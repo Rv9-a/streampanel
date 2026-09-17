@@ -690,7 +690,7 @@ function xtreamCreds(req) {
     return null;
 }
 
-app.get(['/player_api.php', '/panel_api.php'], (req, res) => {
+app.all(['/player_api.php', '/panel_api.php'], (req, res) => {
     const creds = xtreamCreds(req);
     const action = req.query.action;
     if (!creds) {
@@ -772,7 +772,7 @@ app.get(['/player_api.php', '/panel_api.php'], (req, res) => {
 });
 
 // endpoint قديم لكلاسيك Xtream — يعيد قائمة M3U (بعض التطبيقات تعتمد عليه حصراً)
-app.get('/get.php', (req, res) => {
+app.all('/get.php', (req, res) => {
     const creds = xtreamCreds(req);
     if (!creds) return res.status(403).send('Access denied');
     authUser(creds.username, creds.password, (user) => {
@@ -798,7 +798,7 @@ app.get('/get.php', (req, res) => {
 });
 
 // EPG — لا يوجد حالياً، نعيد XMLTV فارغاً كي لا يتعطل التطبيق
-app.get('/xmltv.php', (req, res) => {
+app.all('/xmltv.php', (req, res) => {
     const creds = xtreamCreds(req);
     if (!creds) return res.status(403).send('Access denied');
     authUser(creds.username, creds.password, (user) => {
