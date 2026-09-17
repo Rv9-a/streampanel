@@ -569,7 +569,7 @@ setInterval(() => {
     }
 }, 15000);
 
-app.get('/live/:username/:password/:channelId.m3u8', (req, res) => {
+const serveChannelPlaylist = (req, res) => {
     const { username, password, channelId } = req.params;
 
     authUser(username, password, (user) => {
@@ -614,7 +614,11 @@ app.get('/live/:username/:password/:channelId.m3u8', (req, res) => {
             pollPlaylist();
         });
     });
-});
+};
+
+// يقبل الصيغتين m3u8 و ts — بعض التطبيقات (مثل Next+) تطلب القناة بصيغة .ts
+app.get('/live/:username/:password/:channelId.m3u8', serveChannelPlaylist);
+app.get('/live/:username/:password/:channelId.ts', serveChannelPlaylist);
 
 // خدمة ملفات البث (playlist + المقاطع) تحت مسار مصادق عليه — كل مقطع يمر بالتحقق ويجدّد الجلسة
 // (regex path لتوافق Express 4 و 5)
@@ -784,6 +788,7 @@ app.all('/get.php', (req, res) => {
     authUser(creds.username, creds.password, (user) => {
         if (!user) return res.status(403).send('Access denied');
         const type = req.query.type || 'm3u_plus';
+        const ext = String(req.query.output) === 'ts' ? 'ts' : 'm3u8';
         if (['m3u_plus', 'live', 'live_plus'].includes(String(type))) {
             db.all(`SELECT * FROM channels ORDER BY rowid`, [], (err, channels) => {
                 let out = `#EXTM3U\n`;
@@ -791,7 +796,7 @@ app.all('/get.php', (req, res) => {
                     const g = (ch.group_title || 'سيرفر 1').replace(/,/g, '،');
                     const n = String(ch.name).replace(/,/g, '،');
                     out += `#EXTINF:-1 tvg-id="${ch.id}" tvg-name="${n}" group-title="${g}",${n}\n`;
-                    out += `http://${req.headers.host}/live/${encodeURIComponent(user.username)}/${encodeURIComponent(user.password)}/${ch.id}.m3u8\n`;
+                    out += `http://${req.headers.host}/live/${encodeURIComponent(user.username)}/${encodeURIComponent(user.password)}/${ch.id}.${ext}\n`;
                 });
                 res.setHeader('Content-Type', 'audio/x-mpegurl; charset=utf-8');
                 res.send(out);
