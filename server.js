@@ -939,6 +939,30 @@ app.get('/api/users', checkAdmin, (req, res) => {
     });
 });
 
+app.get('/api/stats', checkAdmin, (req, res) => {
+    db.all(`SELECT * FROM channels`, [], (err, channels) => {
+        db.all(`SELECT * FROM users`, [], (e2, users) => {
+            let connectedDevices = 0;
+            (users || []).forEach(u => {
+                pruneDeviceSessions(u.username);
+                connectedDevices += deviceSessions[u.username] ? deviceSessions[u.username].size : 0;
+            });
+            const groups = {};
+            (channels || []).forEach(c => {
+                const g = c.group_title || 'سيرفر 1';
+                groups[g] = (groups[g] || 0) + 1;
+            });
+            res.json({
+                totalChannels: (channels || []).length,
+                runningChannels: (channels || []).filter(c => !!ffmpegProcesses[c.id]).length,
+                totalUsers: (users || []).length,
+                connectedDevices,
+                groups: Object.entries(groups).map(([name, count]) => ({ name, count }))
+            });
+        });
+    });
+});
+
 app.post('/api/users/add', checkAdmin, (req, res) => {
     const { username, password, max_connections, expire_date } = req.body;
     db.run(`INSERT INTO users (username, password, max_connections, expire_date) VALUES (?, ?, ?, ?)`,
@@ -961,241 +985,17 @@ app.post('/api/users/kick', checkAdmin, (req, res) => {
     });
 });
 
-const adminHtml = `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <title>لوحة IPTV - الإدارة</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
-    <style>
-        body { background: #0f172a; color: #f8fafc; font-family: system-ui; }
-        .card { background: #1e293b; border: 1px solid #334155; color: #fff; }
-    </style>
-</head>
-<body>
-    <div id="login-container" class="container d-flex justify-content-center align-items-center vh-100">
-        <div class="card p-4" style="width: 350px;">
-            <h3 class="text-center mb-4">🔐 تسجيل دخول اللوحة</h3>
-            <div id="login-error" class="alert alert-danger d-none py-2 text-center"></div>
-            <form id="login-form">
-                <div class="mb-3">
-                    <label class="form-label">كلمة مرور اللوحة</label>
-                    <input type="password" id="admin_password" class="form-control" placeholder="أدخل كلمة المرور (admin)" required>
-                </div>
-                <button type="submit" class="btn btn-primary w-100">دخول</button>
-            </form>
-        </div>
-    </div>
-
-    <div id="panel-container" class="container-fluid p-4 d-none">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2>⚡ لوحة إدارة البث والسيرفرات</h2>
-            <button class="btn btn-outline-danger btn-sm" onclick="logout()">تسجيل الخروج</button>
-        </div>
-        <div class="row g-4">
-            <div class="col-lg-6">
-                <div class="card p-3 mb-4">
-                    <h4>➕ إضافة قناة لـ سيرفر</h4>
-                    <hr>
-                    <form id="channel-form" class="row g-2">
-                        <div class="col-md-6"><input type="text" id="ch_id" class="form-control" placeholder="معرّف (rvtv_event)" required></div>
-                        <div class="col-md-6"><input type="text" id="ch_name" class="form-control" placeholder="اسم القناة" required></div>
-                        <div class="col-12"><input type="text" id="ch_group" class="form-control" placeholder="المجموعة" value="bein rv" required></div>
-                        <div class="col-12"><input type="url" id="ch_url" class="form-control" placeholder="رابط Stream الأصلي أو RTMP" required></div>
-                        <div class="col-12">
-                            <select id="ch_stream_type" class="form-select">
-                                <option value="0" selected>🔒 مصدر محمي (يحتاج بروكسي)</option>
-                                <option value="1">📡 رابط مباشر (بدون بروكسي)</option>
-                            </select>
-                        </div>
-                        <div class="col-12">
-                            <select id="ch_always" class="form-select">
-                                <option value="0" selected>⏸ عند الطلب فقط (يبدأ عند أول مشاهد)</option>
-                                <option value="1">🔁 يعمل دائماً بالخلفية</option>
-                            </select>
-                        </div>
-                        <button type="submit" class="btn btn-primary w-100 mt-2">إضافة القناة</button>
-                    </form>
-                </div>
-                <div class="card p-3">
-                    <h4>📺 القنوات المضافة</h4>
-                    <hr>
-                    <div id="channels-list"></div>
-                </div>
-            </div>
-            <div class="col-lg-6">
-                <div class="card p-3">
-                    <h4>👤 إضافة مشترك جديد</h4>
-                    <hr>
-                    <form id="user-form" class="row g-2">
-                        <div class="col-6"><input type="text" id="username" class="form-control" placeholder="اسم المستخدم" required></div>
-                        <div class="col-6"><input type="text" id="password" class="form-control" placeholder="كلمة السر" required></div>
-                        <div class="col-6"><input type="number" id="max_conn" class="form-control" value="1" placeholder="عدد الأجهزة" required></div>
-                        <div class="col-6"><input type="date" id="expire_date" class="form-control" required></div>
-                        <button type="submit" class="btn btn-success w-100 mt-2">إضافة المشترك</button>
-                    </form>
-                    <h4 class="mt-4">📋 قائمة المشتركين وروابط M3U</h4>
-                    <hr>
-                    <div id="users-list"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <script>
-        const HOST = window.location.host;
-        let token = localStorage.getItem('admin_token');
-        if (token) showPanel();
-
-        document.getElementById('login-form').onsubmit = async (e) => {
-            e.preventDefault();
-            const password = document.getElementById('admin_password').value;
-            const res = await fetch('/api/login', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ password })
-            });
-            const data = await res.json();
-            if (data.success) {
-                token = data.token;
-                localStorage.setItem('admin_token', token);
-                showPanel();
-            } else {
-                const errDiv = document.getElementById('login-error');
-                errDiv.innerText = data.error;
-                errDiv.classList.remove('d-none');
-            }
-        };
-
-        function logout() {
-            localStorage.removeItem('admin_token');
-            location.reload();
-        }
-
-        function showPanel() {
-            document.getElementById('login-container').classList.add('d-none');
-            document.getElementById('panel-container').classList.remove('d-none');
-            loadChannels();
-            loadUsers();
-        }
-
-        async function fetchWithAuth(url, options = {}) {
-            options.headers = options.headers || {};
-            options.headers['x-admin-token'] = token;
-            const res = await fetch(url, options);
-            if (res.status === 401) logout();
-            return res;
-        }
-
-        async function loadChannels() {
-            const res = await fetchWithAuth('/api/channels');
-            const channels = await res.json();
-            document.getElementById('channels-list').innerHTML = channels.map(c => \`
-                <div class="d-flex justify-content-between align-items-center mb-2 p-2 bg-dark rounded">
-                    <div>
-                        <strong>\${c.name}</strong> (\${c.id}) 
-                        <span class="badge bg-primary">\${c.group_title}</span>
-                        <span class="badge \${c.always_on ? 'bg-warning text-dark' : 'bg-info'}">\${c.always_on ? '🔁 دائماً' : '⏸ عند الطلب'}</span>
-                        <span class="badge \${c.running ? 'bg-success' : 'bg-secondary'}">\${c.running ? '🟢 تعمل' : '⚪ خاملة'}</span>
-                    </div>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteChannel('\${c.id}')">حذف</button>
-                </div>
-            \`).join('');
-        }
-
-        async function deleteChannel(id) {
-            if(!confirm('متأكد من حذف القناة؟')) return;
-            await fetchWithAuth('/api/channels/delete', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id})
-            });
-            loadChannels();
-        }
-
-        document.getElementById('channel-form').onsubmit = async (e) => {
-            e.preventDefault();
-            await fetchWithAuth('/api/channels/add', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    id: document.getElementById('ch_id').value,
-                    name: document.getElementById('ch_name').value,
-                    group_title: document.getElementById('ch_group').value,
-                    url: document.getElementById('ch_url').value,
-                    stream_type: document.getElementById('ch_stream_type').value,
-                    always_on: document.getElementById('ch_always').value === '1'
-                })
-            });
-            e.target.reset();
-            loadChannels();
-        };
-
-        async function loadUsers() {
-            const res = await fetchWithAuth('/api/users');
-            const users = await res.json();
-            document.getElementById('users-list').innerHTML = users.map(u => {
-                const m3uUrl = \`http://\${HOST}/playlist/\${u.username}/\${u.password}/get.m3u\`;
-                return \`
-                <div class="p-2 mb-2 bg-dark rounded small">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <span>👤 <b>\${u.username}</b> | 🔑 \${u.password} | 📅 \${u.expire_date} | 📡 <b>\${u.connected || 0}</b>/<b>\${u.max_connections || 1}</b> أجهزة</span>
-                        <span>
-                            <button class="btn btn-sm btn-warning py-0" onclick="kickUser(\${u.id})">💢 طرد</button>
-                            <button class="btn btn-sm btn-danger py-0" onclick="deleteUser(\${u.id})">حذف</button>
-                        </span>
-                    </div>
-                    <div class="input-group input-group-sm">
-                        <input type="text" class="form-control" value="\${m3uUrl}" readonly>
-                        <button class="btn btn-outline-info" onclick="navigator.clipboard.writeText('\${m3uUrl}'); alert('تم النسخ!');">📋 نسخ</button>
-                    </div>
-                </div>
-                \`;
-            }).join('');
-        }
-
-        document.getElementById('user-form').onsubmit = async (e) => {
-            e.preventDefault();
-            await fetchWithAuth('/api/users/add', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    username: document.getElementById('username').value,
-                    password: document.getElementById('password').value,
-                    max_connections: document.getElementById('max_conn').value,
-                    expire_date: document.getElementById('expire_date').value
-                })
-            });
-            e.target.reset();
-            loadUsers();
-        };
-
-        async function deleteUser(id) {
-            if(!confirm('متأكد من حذف المشترك؟')) return;
-            await fetchWithAuth('/api/users/delete', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id})
-            });
-            loadUsers();
-        }
-
-        async function kickUser(id) {
-            if(!confirm('طرد جميع أجهزة هذا المشترك الآن؟')) return;
-            await fetchWithAuth('/api/users/kick', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id})
-            });
-            loadUsers();
-        }
-
-        setInterval(loadUsers, 6000);
-    </script>
-</body>
-</html>`;
+const adminHtml = (() => {
+    try {
+        return fs.readFileSync(path.join(__dirname, 'admin.html'), 'utf8');
+    } catch (e) {
+        console.error('[admin] admin.html not found:', e.message);
+        return '<!DOCTYPE html><html dir="rtl"><body style="font-family:sans-serif;background:#0b1020;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh">لوحة التحكم غير متاحة (admin.html مفقود)</body></html>';
+    }
+})();
 
 app.get('/admin', (req, res) => {
-    res.send(adminHtml);
+    res.type('html').send(adminHtml);
 });
 
 process.on('uncaughtException', (err) => {

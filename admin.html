@@ -1,159 +1,731 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>لوحة إدارة IPTV</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
-    <style>
-        body { background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
-        .card { background-color: #1e293b; border: 1px solid #334155; color: #fff; margin-bottom: 20px; }
-        .form-switch .form-check-input { width: 3em; height: 1.5em; cursor: pointer; }
-        .table { color: #cbd5e1; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>لوحة التحكم · IPTV</title>
+<style>
+:root{
+  --bg:#070b16;
+  --bg2:#0b1120;
+  --surface:#111827;
+  --surface2:#0d1526;
+  --border:rgba(129,140,248,.14);
+  --accent:#6366f1;
+  --accent2:#a855f7;
+  --grad:linear-gradient(135deg,#6366f1,#a855f7);
+  --ok:#34d399;
+  --warn:#fbbf24;
+  --danger:#f87171;
+  --text:#e2e8f0;
+  --muted:#8b96b3;
+  --shadow:0 18px 50px -20px rgba(0,0,0,.7);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  background:
+    radial-gradient(900px 600px at 85% -10%,rgba(99,102,241,.14),transparent),
+    radial-gradient(700px 500px at -10% 110%,rgba(168,85,247,.10),transparent),
+    var(--bg);
+  color:var(--text);
+  font-family:'Segoe UI',system-ui,-apple-system,'Tahoma',sans-serif;
+  overflow-x:hidden;
+}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#2a3456;border-radius:10px}
+::-webkit-scrollbar-thumb:hover{background:#3a4670}
+::selection{background:rgba(99,102,241,.4)}
+.hidden{display:none!important}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes pop{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
+@keyframes pulseDot{0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,.5)}50%{box-shadow:0 0 0 7px rgba(52,211,153,0)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes slideIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+
+/* ===== LOGIN ===== */
+.login-screen{
+  min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+  position:relative;
+}
+.login-card{
+  position:relative;width:100%;max-width:400px;padding:40px 34px;border-radius:22px;
+  background:rgba(17,24,39,.72);border:1px solid var(--border);backdrop-filter:blur(18px);
+  box-shadow:var(--shadow);animation:pop .45s cubic-bezier(.2,.9,.3,1.2);
+}
+.login-card::before{
+  content:"";position:absolute;inset:-1px;border-radius:22px;padding:1px;
+  background:linear-gradient(135deg,rgba(99,102,241,.6),transparent 40%,transparent 60%,rgba(168,85,247,.55));
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;
+}
+.login-logo{font-size:44px;text-align:center;margin-bottom:6px}
+.login-title{text-align:center;font-size:20px;font-weight:700;margin-bottom:4px;
+  background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.login-sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:28px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.input{
+  width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--border);
+  background:rgba(255,255,255,.03);color:var(--text);font-size:14px;outline:none;transition:.2s;
+}
+.input:focus{border-color:var(--accent);background:rgba(99,102,241,.07);box-shadow:0 0 0 4px rgba(99,102,241,.12)}
+.input::placeholder{color:#5a6688}
+.btn{
+  border:none;cursor:pointer;border-radius:12px;font-weight:700;font-size:14px;font-family:inherit;
+  padding:12px 18px;transition:.18s;color:#fff;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  background:linear-gradient(135deg,#1f2942,#141c32);
+}
+.btn:hover{transform:translateY(-1px);filter:brightness(1.1)}
+.btn:active{transform:translateY(0)}
+.btn:disabled{opacity:.6;cursor:not-allowed;transform:none!important}
+.btn-primary{background:var(--grad);box-shadow:0 10px 24px -10px rgba(99,102,241,.65)}
+.btn-ok{background:linear-gradient(135deg,#10b981,#059669)}
+.btn-danger{background:linear-gradient(135deg,#ef4444,#dc2626)}
+.btn-warn{background:linear-gradient(135deg,#f59e0b,#d97706)}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn-sm{padding:7px 12px;font-size:12.5px;border-radius:10px}
+.btn-block{width:100%}
+.login-err{display:none;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#fecaca;
+  padding:10px 14px;border-radius:12px;font-size:13px;margin-bottom:16px;text-align:center;animation:pop .2s}
+
+/* ===== LAYOUT ===== */
+.app{display:flex;min-height:100vh}
+.sidebar{
+  position:fixed;top:0;right:0;bottom:0;width:246px;z-index:50;
+  background:rgba(11,17,32,.85);backdrop-filter:blur(18px);border-left:1px solid var(--border);
+  display:flex;flex-direction:column;padding:22px 16px;transition:transform .3s;
+}
+.brand{display:flex;align-items:center;gap:12px;padding:4px 8px 22px;border-bottom:1px solid var(--border);margin-bottom:18px}
+.brand-ic{width:42px;height:42px;border-radius:13px;background:var(--grad);display:grid;place-items:center;font-size:20px;box-shadow:0 8px 20px -6px rgba(99,102,241,.7)}
+.brand-name{font-weight:800;font-size:15.5px;line-height:1.2}
+.brand-sub{font-size:11px;color:var(--muted)}
+.nav{display:flex;flex-direction:column;gap:6px;flex:1}
+.nav-item{
+  display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:13px;cursor:pointer;
+  color:var(--muted);font-size:14px;font-weight:600;border:1px solid transparent;transition:.18s;user-select:none;
+}
+.nav-item .ico{font-size:17px;width:26px;text-align:center}
+.nav-item:hover{color:var(--text);background:rgba(255,255,255,.04)}
+.nav-item.active{color:#fff;background:linear-gradient(135deg,rgba(99,102,241,.22),rgba(168,85,247,.16));border-color:rgba(99,102,241,.35)}
+.nav-item.active .ico{transform:scale(1.1)}
+.sidebar-foot{border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:8px}
+.sidebar-user{display:flex;align-items:center;gap:10px;padding:8px 10px;font-size:12.5px;color:var(--muted)}
+.sidebar-user .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);animation:pulseDot 2s infinite}
+
+.main{flex:1;margin-right:246px;padding:26px 32px 60px;min-width:0}
+.topbar{display:flex;align-items:center;gap:16px;margin-bottom:26px;flex-wrap:wrap}
+.topbar h1{font-size:22px;font-weight:800;flex:1}
+.clock{font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted);background:rgba(255,255,255,.03);
+  border:1px solid var(--border);padding:7px 13px;border-radius:11px}
+.chip-live{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ok);background:rgba(52,211,153,.1);
+  border:1px solid rgba(52,211,153,.28);padding:5px 12px;border-radius:20px;font-weight:700}
+.chip-live .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:pulseDot 2s infinite}
+
+/* ===== CARDS ===== */
+.page{animation:fadeUp .35s ease}
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.stat-card{
+  position:relative;border-radius:18px;padding:20px;overflow:hidden;
+  background:linear-gradient(160deg,rgba(17,24,39,.9),rgba(13,21,38,.9));
+  border:1px solid var(--border);box-shadow:var(--shadow);animation:fadeUp .4s ease both;
+}
+.stat-card .s-ic{position:absolute;left:14px;top:14px;font-size:24px;opacity:.16}
+.stat-card .s-val{font-size:32px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.stat-card .s-lbl{color:var(--muted);font-size:13px;margin-top:8px;font-weight:600}
+.stat-card .s-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.s-ok{color:var(--ok)}.s-acc{color:var(--accent)}.s-warn{color:var(--warn)}.s-red{color:var(--danger)}
+
+.section{background:linear-gradient(160deg,rgba(17,24,39,.9),rgba(13,21,38,.92));border:1px solid var(--border);
+  border-radius:18px;box-shadow:var(--shadow);margin-bottom:22px;animation:fadeUp .4s ease both}
+.section-h{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.section-h h3{font-size:15.5px;font-weight:700;flex:1}
+.section-b{padding:18px 20px}
+
+/* dashboard: groups */
+.groups-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+.group-tile{display:flex;align-items:center;gap:12px;padding:14px;border-radius:14px;background:rgba(255,255,255,.03);
+  border:1px solid var(--border);transition:.18s;cursor:pointer}
+.group-tile:hover{transform:translateY(-2px);border-color:var(--accent);background:rgba(99,102,241,.08)}
+.group-tile .g-ic{width:38px;height:38px;border-radius:11px;background:var(--grad);display:grid;place-items:center;font-size:17px}
+.group-tile .g-name{font-size:13px;font-weight:700}
+.group-tile .g-cnt{font-size:11px;color:var(--muted)}
+
+/* chips */
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.chip{padding:7px 14px;border-radius:20px;font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid var(--border);
+  background:rgba(255,255,255,.03);color:var(--muted);transition:.18s;user-select:none}
+.chip:hover{color:var(--text)}
+.chip.active{background:var(--grad);color:#fff;border-color:transparent;box-shadow:0 6px 16px -6px rgba(99,102,241,.6)}
+.chip .n{opacity:.7;font-weight:600}
+
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.search-wrap{flex:1;min-width:220px;position:relative}
+.search-wrap .input{padding-right:38px}
+.search-ic{position:absolute;right:13px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:14px;pointer-events:none}
+
+/* channel cards */
+.ch-list{display:flex;flex-direction:column;gap:10px}
+.ch-card{display:flex;align-items:center;gap:14px;padding:13px 16px;border-radius:14px;
+  background:rgba(255,255,255,.03);border:1px solid var(--border);transition:.18s;animation:fadeUp .3s ease both}
+.ch-card:hover{border-color:rgba(99,102,241,.4);background:rgba(99,102,241,.05);transform:translateX(-2px)}
+.ch-info{flex:1;min-width:0}
+.ch-name{font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px}
+.ch-id{font-size:11px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;margin-top:3px}
+.ch-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+.badge{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;display:inline-flex;align-items:center;gap:5px}
+.bd-group{background:rgba(99,102,241,.16);color:#c7d2fe;border:1px solid rgba(99,102,241,.35)}
+.bd-always{background:rgba(251,191,36,.14);color:#fde68a;border:1px solid rgba(251,191,36,.35)}
+.bd-demand{background:rgba(148,163,184,.12);color:#cbd5e1;border:1px solid rgba(148,163,184,.3)}
+.bd-proxy{background:rgba(168,85,247,.14);color:#e9d5ff;border:1px solid rgba(168,85,247,.35)}
+.bd-direct{background:rgba(52,211,153,.13);color:#a7f3d0;border:1px solid rgba(52,211,153,.35)}
+.status{border-radius:20px;padding:5px 12px;font-size:12px;font-weight:700;display:flex;align-items:center;gap:7px;white-space:nowrap}
+.status .dot{width:8px;height:8px;border-radius:50%}
+.st-run{background:rgba(52,211,153,.12);color:var(--ok);border:1px solid rgba(52,211,153,.3)}
+.st-run .dot{background:var(--ok);animation:pulseDot 2s infinite}
+.st-idle{background:rgba(148,163,184,.09);color:#94a3b8;border:1px solid rgba(148,163,184,.25)}
+.st-idle .dot{background:#64748b}
+.ch-actions{display:flex;gap:8px}
+
+/* user cards */
+.usr-list{display:flex;flex-direction:column;gap:12px}
+.usr-card{padding:16px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid var(--border);animation:fadeUp .3s ease both}
+.usr-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.avatar{width:44px;height:44px;border-radius:13px;background:var(--grad);display:grid;place-items:center;font-weight:800;font-size:19px;color:#fff;flex-shrink:0}
+.usr-idx{font-size:12.5px;font-weight:700;min-width:0}
+.usr-idx .un{display:block;font-size:15px}
+.usr-idx .meta{color:var(--muted);font-size:11.5px;font-family:ui-monospace,Consolas,monospace;word-break:break-all}
+.usr-side{margin-right:auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.expiry{font-size:12px;color:var(--muted)}
+.expiry.exp{color:var(--danger);font-weight:700}
+.dev-wrap{display:flex;flex-direction:column;gap:5px;min-width:150px}
+.dev-label{font-size:11.5px;color:var(--muted);font-weight:600}
+.dev-bar{height:8px;border-radius:20px;background:rgba(255,255,255,.06);overflow:hidden}
+.dev-fill{height:100%;border-radius:20px;background:var(--grad);transition:width .5s cubic-bezier(.2,.9,.3,1)}
+.dev-fill.full{background:linear-gradient(135deg,#f59e0b,#f87171)}
+.usr-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.m3u-row{display:flex;gap:8px;margin-top:12px}
+.m3u-row .input{flex:1;font-family:ui-monospace,Consolas,monospace;font-size:12px;direction:ltr;text-align:left}
+
+.empty{text-align:center;color:var(--muted);padding:34px 10px;font-size:13.5px}
+.empty .big{font-size:38px;margin-bottom:8px}
+
+/* forms */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.form-grid .full{grid-column:1/-1}
+.form-hint{font-size:11.5px;color:var(--muted);margin-top:5px}
+
+/* modal */
+.modal-ov{position:fixed;inset:0;background:rgba(4,7,16,.7);backdrop-filter:blur(6px);z-index:100;display:grid;place-items:center;animation:pop .2s}
+.modal{width:min(92vw,380px);padding:26px;border-radius:18px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow)}
+.modal .m-txt{font-size:14.5px;line-height:1.7;margin-bottom:20px}
+.modal .m-acts{display:flex;gap:10px;justify-content:flex-end}
+
+/* toast */
+.toast-wrap{position:fixed;bottom:22px;left:22px;z-index:200;display:flex;flex-direction:column;gap:10px}
+.toast{min-width:230px;max-width:340px;padding:13px 16px;border-radius:13px;font-size:13.5px;font-weight:600;
+  background:var(--surface2);border:1px solid var(--border);box-shadow:var(--shadow);animation:slideIn .3s cubic-bezier(.2,.9,.3,1.2);display:flex;gap:10px;align-items:center}
+.toast.ok{border-color:rgba(52,211,153,.4)}
+.toast.ok .t-ic{color:var(--ok)}
+.toast.err{border-color:rgba(248,113,113,.4)}
+.toast.err .t-ic{color:var(--danger)}
+.toast.out{opacity:0;transform:translateY(10px);transition:.25s}
+
+/* spinner */
+.spin{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+
+@media(max-width:980px){
+  .sidebar{transform:translateX(100%)}
+  .sidebar.open{transform:none}
+  .main{margin-right:0;padding:20px 16px}
+  .stat-grid{grid-template-columns:repeat(2,1fr)}
+  .form-grid{grid-template-columns:1fr}
+  .menu-btn{display:inline-flex!important}
+}
+.menu-btn{display:none}
+</style>
 </head>
-<body class="p-4">
-    <div class="container">
-        <h2 class="mb-4 text-center">📺 لوحة إدارة القنوات والمشتركين</h2>
+<body>
 
-        <!-- قسم القنوات -->
-        <div class="card p-3">
-            <h4>إدارة القنوات (البث المباشر)</h4>
-            <div class="row" id="channelsList"></div>
-        </div>
+<!-- ================= LOGIN ================= -->
+<div class="login-screen" id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">⚡</div>
+    <div class="login-title">لوحة التحكم IPTV</div>
+    <div class="login-sub">أدخل كلمة المرور للوصول إلى الإدارة</div>
+    <div class="login-err" id="login-err"></div>
+    <form id="login-form">
+      <div class="field">
+        <label>كلمة مرور اللوحة</label>
+        <input type="password" class="input" id="admin_password" placeholder="••••••••" autofocus required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block" id="login-btn">دخول</button>
+    </form>
+  </div>
+</div>
 
-        <!-- قسم إضافة مشترك -->
-        <div class="card p-3">
-            <h4>إضافة مشترك جديد</h4>
-            <form id="addUserForm" class="row g-3">
-                <div class="col-md-3">
-                    <input type="text" id="username" class="form-control" placeholder="اسم المستخدم" required>
-                </div>
-                <div class="col-md-3">
-                    <input type="text" id="password" class="form-control" placeholder="كلمة السر" required>
-                </div>
-                <div class="col-md-2">
-                    <input type="number" id="max_connections" class="form-control" value="1" min="1" placeholder="عدد الأجهزة" required>
-                </div>
-                <div class="col-md-3">
-                    <input type="date" id="expire_date" class="form-control" required>
-                </div>
-                <div class="col-md-1">
-                    <button type="submit" class="btn btn-primary w-100">إضافة</button>
-                </div>
-            </form>
-        </div>
+<!-- ================= APP ================= -->
+<div class="app hidden" id="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-ic">⚡</div>
+      <div>
+        <div class="brand-name">IPTV Control</div>
+        <div class="brand-sub">نظام إدارة البث</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <div class="nav-item active" data-page="dashboard"><span class="ico">📊</span>لوحة التحكم</div>
+      <div class="nav-item" data-page="channels"><span class="ico">📺</span>القنوات</div>
+      <div class="nav-item" data-page="users"><span class="ico">👥</span>المشتركين</div>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="sidebar-user"><span class="dot"></span>متصل بالسيرفر</div>
+      <button class="btn btn-ghost btn-sm btn-block" onclick="logout()">🚪 تسجيل الخروج</button>
+    </div>
+  </aside>
 
-        <!-- جدول المشتركين -->
-        <div class="card p-3">
-            <h4>قائمة المشتركين</h4>
-            <div class="table-responsive">
-                <table class="table align-middle">
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>المستخدم</th>
-                            <th>كلمة السر</th>
-                            <th>الأجهزة المسموح بها</th>
-                            <th>تاريخ الانتهاء</th>
-                            <th>إجراء</th>
-                        </tr>
-                    </thead>
-                    <tbody id="usersTable"></tbody>
-                </table>
-            </div>
-        </div>
+  <main class="main">
+    <div class="topbar">
+      <button class="btn btn-ghost btn-sm menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+      <h1 id="page-title">لوحة التحكم</h1>
+      <span class="chip-live"><span class="dot"></span>بث حي</span>
+      <span class="clock" id="clock">--:--:--</span>
     </div>
 
-    <script>
-        // تحميل القنوات
-        async function loadChannels() {
-            const res = await fetch('/api/channels');
-            const channels = await res.json();
-            const container = document.getElementById('channelsList');
-            container.innerHTML = '';
+    <!-- ===== DASHBOARD ===== -->
+    <section class="page" id="page-dashboard">
+      <div class="stat-grid">
+        <div class="stat-card" style="animation-delay:.05s">
+          <span class="s-ic">📺</span>
+          <div class="s-val s-acc" id="st-ch">0</div>
+          <div class="s-lbl">إجمالي القنوات</div>
+          <div class="s-sub">كل المجموعات</div>
+        </div>
+        <div class="stat-card" style="animation-delay:.1s">
+          <span class="s-ic">📡</span>
+          <div class="s-val s-ok" id="st-run">0</div>
+          <div class="s-lbl">قنوات تعمل الآن</div>
+          <div class="s-sub">ffmpeg نشط</div>
+        </div>
+        <div class="stat-card" style="animation-delay:.15s">
+          <span class="s-ic">👥</span>
+          <div class="s-val s-warn" id="st-usr">0</div>
+          <div class="s-lbl">المشتركين</div>
+          <div class="s-sub">حسابات مفعلة</div>
+        </div>
+        <div class="stat-card" style="animation-delay:.2s">
+          <span class="s-ic">📱</span>
+          <div class="s-val s-red" id="st-dev">0</div>
+          <div class="s-lbl">أجهزة متصلة</div>
+          <div class="s-sub">جلسات حية</div>
+        </div>
+      </div>
 
-            channels.forEach(ch => {
-                container.innerHTML += `
-                    <div class="col-md-4 mb-3">
-                        <div class="p-3 border rounded border-secondary d-flex justify-content-between align-items-center">
-                            <div>
-                                <strong>${ch.name}</strong>
-                                <br><small class="text-muted">${ch.id}</small>
-                            </div>
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" ${ch.active ? 'checked' : ''} onchange="toggleChannel('${ch.id}', this.checked)">
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-        }
+      <div class="section">
+        <div class="section-h"><h3>🗂️ المجموعات</h3></div>
+        <div class="section-b"><div class="groups-grid" id="groups-grid"></div></div>
+      </div>
 
-        async function toggleChannel(id, active) {
-            await fetch('/api/channels/toggle', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, active })
-            });
-        }
+      <div class="section">
+        <div class="section-h"><h3>🚀 إجراءات سريعة</h3></div>
+        <div class="section-b" style="display:flex;gap:12px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="goTo('channels')">➕ إضافة قناة</button>
+          <button class="btn btn-ok" onclick="goTo('users')">➕ إضافة مشترك</button>
+        </div>
+      </div>
+    </section>
 
-        // تحميل المشتركين
-        async function loadUsers() {
-            const res = await fetch('/api/users');
-            const users = await res.json();
-            const tbody = document.getElementById('usersTable');
-            tbody.innerHTML = '';
+    <!-- ===== CHANNELS ===== -->
+    <section class="page hidden" id="page-channels">
+      <div class="section hidden" id="ch-add-sec" style="display:none">
+        <div class="section-h"><h3>➕ إضافة قناة</h3><button class="btn btn-ghost btn-sm" onclick="toggleAddChannel()">✕ إغلاق</button></div>
+        <div class="section-b">
+          <form id="channel-form" class="form-grid">
+            <div class="field">
+              <label>معرّف القناة</label>
+              <input type="text" class="input" id="ch_id" placeholder="bein5" required>
+              <div class="form-hint">معرّف فريد يُستخدم في الروابط</div>
+            </div>
+            <div class="field">
+              <label>اسم القناة</label>
+              <input type="text" class="input" id="ch_name" placeholder="beIN Sports 5" required>
+            </div>
+            <div class="field full">
+              <label>المجموعة</label>
+              <input type="text" class="input" id="ch_group" placeholder="bein rv" required>
+            </div>
+            <div class="field full">
+              <label>رابط البث الأصلي أو RTMP</label>
+              <input type="text" class="input" id="ch_url" placeholder="http://... أو rtmp://..." dir="ltr" required>
+            </div>
+            <div class="field">
+              <label>نوع المصدر</label>
+              <select class="input" id="ch_stream_type">
+                <option value="0">🔒 مصدر محمي (يحتاج بروكسي)</option>
+                <option value="1">📡 رابط مباشر (بدون بروكسي)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>وضع التشغيل</label>
+              <select class="input" id="ch_always">
+                <option value="0">⏸ عند الطلب فقط</option>
+                <option value="1">🔁 يعمل دائماً</option>
+              </select>
+            </div>
+            <button type="submit" class="btn btn-primary full">💾 حفظ القناة</button>
+          </form>
+        </div>
+      </div>
 
-            users.forEach(user => {
-                tbody.innerHTML += `
-                    <tr>
-                        <td>${user.id}</td>
-                        <td><strong>${user.username}</strong></td>
-                        <td><code>${user.password}</code></td>
-                        <td><span class="badge bg-info">${user.max_connections} جهاز</span></td>
-                        <td>${user.expire_date}</td>
-                        <td>
-                            <button class="btn btn-danger btn-sm" onclick="deleteUser(${user.id})">حذف</button>
-                        </td>
-                    </tr>
-                `;
-            });
-        }
+      <div class="section">
+        <div class="section-h">
+          <h3>📺 القنوات <span style="color:var(--muted);font-weight:600" id="ch-count"></span></h3>
+          <button class="btn btn-primary btn-sm" onclick="toggleAddChannel()">➕ إضافة قناة</button>
+        </div>
+        <div class="section-b">
+          <div class="toolbar">
+            <div class="search-wrap">
+              <span class="search-ic">🔍</span>
+              <input type="text" class="input" id="ch-search" placeholder="ابحث عن قناة بالاسم أو المعرّف...">
+            </div>
+          </div>
+          <div class="chips" id="ch-chips"></div>
+          <div class="ch-list" id="channels-list"></div>
+        </div>
+      </div>
+    </section>
 
-        document.getElementById('addUserForm').onsubmit = async (e) => {
-            e.preventDefault();
-            const data = {
-                username: document.getElementById('username').value,
-                password: document.getElementById('password').value,
-                max_connections: parseInt(document.getElementById('max_connections').value),
-                expire_date: document.getElementById('expire_date').value
-            };
+    <!-- ===== USERS ===== -->
+    <section class="page hidden" id="page-users">
+      <div class="section hidden" id="usr-add-sec" style="display:none">
+        <div class="section-h"><h3>➕ إضافة مشترك</h3><button class="btn btn-ghost btn-sm" onclick="toggleAddUser()">✕ إغلاق</button></div>
+        <div class="section-b">
+          <form id="user-form" class="form-grid">
+            <div class="field"><label>اسم المستخدم</label><input type="text" class="input" id="username" required></div>
+            <div class="field"><label>كلمة السر</label><input type="text" class="input" id="password" required></div>
+            <div class="field"><label>عدد الأجهزة المسموحة</label><input type="number" class="input" id="max_conn" value="1" min="1" required></div>
+            <div class="field"><label>تاريخ الانتهاء</label><input type="date" class="input" id="expire_date" required></div>
+            <button type="submit" class="btn btn-ok full">💾 إنشاء المشترك</button>
+          </form>
+        </div>
+      </div>
 
-            const res = await fetch('/api/users/add', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
+      <div class="section">
+        <div class="section-h">
+          <h3>👥 المشتركين <span style="color:var(--muted);font-weight:600" id="usr-count"></span></h3>
+          <button class="btn btn-ok btn-sm" onclick="toggleAddUser()">➕ إضافة مشترك</button>
+        </div>
+        <div class="section-b">
+          <div class="toolbar">
+            <div class="search-wrap">
+              <span class="search-ic">🔍</span>
+              <input type="text" class="input" id="usr-search" placeholder="ابحث عن مشترك...">
+            </div>
+          </div>
+          <div class="usr-list" id="users-list"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
 
-            if (res.ok) {
-                e.target.reset();
-                loadUsers();
-            } else {
-                const err = await res.json();
-                alert(err.error);
-            }
-        };
+<!-- ================= MODAL ================= -->
+<div class="modal-ov hidden" id="modal">
+  <div class="modal">
+    <div class="m-txt" id="modal-text"></div>
+    <div class="m-acts">
+      <button class="btn btn-ghost btn-sm" id="modal-cancel">إلغاء</button>
+      <button class="btn btn-danger btn-sm" id="modal-ok">تأكيد</button>
+    </div>
+  </div>
+</div>
 
-        async function deleteUser(id) {
-            if (confirm('هل أنت تأكد من حذف هذا المشترك؟')) {
-                await fetch('/api/users/' + id, { method: 'DELETE' });
-                loadUsers();
-            }
-        }
+<div class="toast-wrap" id="toast-wrap"></div>
 
-        loadChannels();
-        loadUsers();
-    </script>
+<script>
+const HOST = window.location.host;
+let token = localStorage.getItem('admin_token') || '';
+const state = {
+  page: 'dashboard',
+  channels: [],
+  users: [],
+  groups: [],
+  chGroup: 'all',
+  chSearch: '',
+  usrSearch: ''
+};
+
+/* ---------- auth ---------- */
+const qs = s => document.querySelector(s);
+const api = async (url, opts={}) => {
+  opts.headers = opts.headers || {};
+  opts.headers['x-admin-token'] = token;
+  const res = await fetch(url, opts);
+  if (res.status === 401) { logout(); throw new Error('unauthorized'); }
+  return res;
+};
+
+document.getElementById('login-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = qs('#login-btn'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span> جارِ التحقق...';
+  try {
+    const res = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password: qs('#admin_password').value}) });
+    const data = await res.json();
+    if (data.success) { token = data.token; localStorage.setItem('admin_token', token); enter(); }
+    else { const er = qs('#login-err'); er.textContent = data.error || 'كلمة المرور غير صحيحة'; er.style.display='block'; }
+  } catch(_) { const er = qs('#login-err'); er.textContent='تعذر الاتصال بالسيرفر'; er.style.display='block'; }
+  btn.disabled = false; btn.innerHTML = 'دخول';
+};
+
+function logout(){
+  localStorage.removeItem('admin_token');
+  token = '';
+  location.reload();
+}
+function enter(){
+  qs('#login-screen').classList.add('hidden');
+  qs('#app').classList.remove('hidden');
+  init();
+}
+
+/* ---------- toast / confirm / copy ---------- */
+function toast(msg, type='ok'){
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.innerHTML = '<span class="t-ic">' + (type==='err' ? '⚠️' : '✓') + '</span><span>' + msg + '</span>';
+  qs('#toast-wrap').appendChild(el);
+  setTimeout(()=>{ el.classList.add('out'); setTimeout(()=>el.remove(), 260); }, 2400);
+}
+function confirmDialog(msg){
+  return new Promise(resolve => {
+    qs('#modal-text').textContent = msg;
+    qs('#modal').classList.remove('hidden');
+    qs('#modal-ok').onclick = ()=>{ closeModal(); resolve(true); };
+    qs('#modal-cancel').onclick = ()=>{ closeModal(); resolve(false); };
+  });
+}
+function closeModal(){ qs('#modal').classList.add('hidden'); }
+function copyText(t){
+  (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject())
+    .then(()=>toast('تم النسخ بنجاح'))
+    .catch(()=>{ window.prompt('انسخ يدوياً:', t); });
+}
+
+/* ---------- routing ---------- */
+function goTo(page){
+  state.page = page;
+  qs('#nav').querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === page));
+  ['dashboard','channels','users'].forEach(p => {
+    qs('#page-' + p).classList.toggle('hidden', p !== page);
+  });
+  qs('#page-title').textContent = {dashboard:'لوحة التحكم', channels:'القنوات', users:'المشتركين'}[page];
+  document.getElementById('sidebar').classList.remove('open');
+  if (page === 'channels') renderChannels();
+  if (page === 'users') renderUsers();
+}
+qs('#nav').querySelectorAll('.nav-item').forEach(n => n.onclick = () => goTo(n.dataset.page));
+
+/* ---------- clock ---------- */
+function tick(){
+  const d = new Date();
+  qs('#clock').textContent = d.toLocaleTimeString('ar-IQ', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+setInterval(tick, 1000); tick();
+
+/* ---------- counters ---------- */
+function animateCount(el, target){
+  const from = 0, dur = 700, start = performance.now();
+  function step(now){
+    let p = Math.min((now - start) / dur, 1);
+    p = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(from + (target - from) * p);
+    if (p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+/* ---------- data ---------- */
+async function loadStats(){
+  try{
+    const res = await api('/api/stats');
+    const s = await res.json();
+    animateCount(qs('#st-ch'), s.totalChannels);
+    animateCount(qs('#st-run'), s.runningChannels);
+    animateCount(qs('#st-usr'), s.totalUsers);
+    animateCount(qs('#st-dev'), s.connectedDevices);
+    state.groups = s.groups || [];
+    qs('#groups-grid').innerHTML = (state.groups.length ? state.groups : []).map(g => `
+      <div class="group-tile" onclick="goTo('channels'); setGroup('${g.name.replace(/'/g,"\\'")}')">
+        <div class="g-ic">📡</div>
+        <div><div class="g-name">${g.name}</div><div class="g-cnt">${g.count} قناة</div></div>
+      </div>`).join('') || '<div class="empty">لا مجموعات بعد</div>';
+  }catch(_){}
+}
+async function loadChannels(){
+  try{
+    const res = await api('/api/channels');
+    state.channels = await res.json();
+    buildChips();
+    renderChannels();
+  }catch(_){}
+}
+async function loadUsers(){
+  if (document.activeElement && document.activeElement.id === 'usr-search') return;
+  try{
+    const res = await api('/api/users');
+    state.users = await res.json();
+    renderUsers();
+  }catch(_){}
+}
+
+function buildChips(){
+  const chips = [['all','الكل', state.channels.length]];
+  const map = {};
+  state.channels.forEach(c => { const g = c.group_title || 'سيرفر 1'; map[g] = (map[g]||0)+1; });
+  Object.entries(map).forEach(([g,n]) => chips.push([g, g, n]));
+  qs('#ch-chips').innerHTML = chips.map(([v,l,n]) => `
+    <div class="chip ${state.chGroup===v?'active':''}" onclick="setGroup('${v.replace(/'/g,"\\'")}')">${l} <span class="n">${n}</span></div>`).join('');
+}
+function setGroup(g){ state.chGroup = g; buildChips(); renderChannels(); }
+
+function renderChannels(){
+  const q = state.chSearch.trim().toLowerCase();
+  const list = state.channels.filter(c => {
+    if (state.chGroup !== 'all' && (c.group_title || 'سيرفر 1') !== state.chGroup) return false;
+    if (!q) return true;
+    return (c.name || '').toLowerCase().includes(q) || (c.id || '').toLowerCase().includes(q);
+  });
+  qs('#ch-count').textContent = `(${list.length}/${state.channels.length})`;
+  if (!list.length){ qs('#channels-list').innerHTML = '<div class="empty"><div class="big">📭</div>لا توجد قنوات مطابقة</div>'; return; }
+  qs('#channels-list').innerHTML = list.map((c, i) => `
+    <div class="ch-card" style="animation-delay:${Math.min(i*0.02,0.3)}s">
+      <div class="ch-info">
+        <div class="ch-name">${c.name}</div>
+        <div class="ch-id">${c.id}</div>
+        <div class="ch-badges">
+          <span class="badge bd-group">${c.group_title || 'سيرفر 1'}</span>
+          <span class="badge ${c.always_on?'bd-always':'bd-demand'}">${c.always_on?'🔁 دائماً':'⏸ عند الطلب'}</span>
+          <span class="badge ${parseInt(c.stream_type)===1?'bd-direct':'bd-proxy'}">${parseInt(c.stream_type)===1?'📡 مباشر':'🔒 بروكسي'}</span>
+        </div>
+      </div>
+      <span class="status ${c.running?'st-run':'st-idle'}"><span class="dot"></span>${c.running?'تعمل':'خاملة'}</span>
+      <div class="ch-actions">
+        <button class="btn btn-danger btn-sm" onclick="deleteChannel('${c.id.replace(/'/g,"\\'")}')">🗑</button>
+      </div>
+    </div>`).join('');
+}
+
+async function deleteChannel(id){
+  if (!await confirmDialog('هل أنت متأكد من حذف القناة «' + id + '»؟')) return;
+  await api('/api/channels/delete', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}) });
+  toast('تم حذف القناة ' + id);
+  loadChannels(); loadStats();
+}
+
+function renderUsers(){
+  const q = state.usrSearch.trim().toLowerCase();
+  const list = state.users.filter(u => !q || u.username.toLowerCase().includes(q) || (u.password||'').toLowerCase().includes(q));
+  qs('#usr-count').textContent = `(${state.users.length})`;
+  if (!list.length){ qs('#users-list').innerHTML = '<div class="empty"><div class="big">👤</div>لا يوجد مشتركون</div>'; return; }
+  qs('#users-list').innerHTML = list.map(u => {
+    const max = u.max_connections || 1, conn = u.connected || 0, pct = Math.min(100, Math.round((conn/max)*100));
+    const m3u = `http://${HOST}/playlist/${encodeURIComponent(u.username)}/${encodeURIComponent(u.password)}/get.m3u`;
+    const expired = u.expire_date && new Date(u.expire_date) < new Date();
+    return `
+    <div class="usr-card">
+      <div class="usr-top">
+        <div class="avatar">${(u.username||'؟').slice(0,1).toUpperCase()}</div>
+        <div class="usr-idx">
+          <span class="un">${u.username} ${expired?'<span class="badge bd-always">انتهى</span>':''}</span>
+          <span class="meta">${u.password}</span>
+        </div>
+        <div class="usr-side">
+          <span class="expiry ${expired?'exp':''}">📅 ${u.expire_date || '—'}</span>
+          <div class="dev-wrap">
+            <div class="dev-label">الأجهزة: ${conn}/${max}</div>
+            <div class="dev-bar"><div class="dev-fill ${conn>=max?'full':''}" style="width:${pct}%"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="m3u-row">
+        <input type="text" class="input" value="${m3u}" readonly onclick="this.select()">
+        <button class="btn btn-primary btn-sm" onclick="copyText('${m3u}')">📋 نسخ</button>
+      </div>
+      <div class="usr-actions">
+        <button class="btn btn-warn btn-sm" onclick="kickUser(${u.id})">💢 طرد الأجهزة</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, '${u.username.replace(/'/g,"\\'")}')">🗑 حذف</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function deleteUser(id, name){
+  if (!await confirmDialog('حذف المشترك «' + name + '» نهائياً؟')) return;
+  await api('/api/users/delete', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}) });
+  toast('تم حذف المشترك');
+  loadUsers(); loadStats();
+}
+async function kickUser(id){
+  if (!await confirmDialog('طرد جميع أجهزة هذا المشترك الآن؟')) return;
+  await api('/api/users/kick', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}) });
+  toast('تم طرد جميع الأجهزة');
+  loadUsers(); loadStats();
+}
+
+/* ---------- add forms ---------- */
+function toggleAddChannel(){ qs('#ch-add-sec').classList.toggle('hidden'); }
+function toggleAddUser(){ qs('#usr-add-sec').classList.toggle('hidden'); }
+
+qs('#channel-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+  await api('/api/channels/add', { method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      id: qs('#ch_id').value.trim(), name: qs('#ch_name').value.trim(),
+      group_title: qs('#ch_group').value.trim(), url: qs('#ch_url').value.trim(),
+      stream_type: qs('#ch_stream_type').value, always_on: qs('#ch_always').value === '1'
+    })
+  });
+  btn.disabled = false; btn.innerHTML = '💾 حفظ القناة';
+  e.target.reset();
+  toast('تم إضافة القناة');
+  loadChannels(); loadStats();
+};
+
+qs('#user-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+  await api('/api/users/add', { method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      username: qs('#username').value.trim(), password: qs('#password').value.trim(),
+      max_connections: qs('#max_conn').value, expire_date: qs('#expire_date').value
+    })
+  });
+  btn.disabled = false; btn.innerHTML = '💾 إنشاء المشترك';
+  e.target.reset();
+  toast('تم إضافة المشترك');
+  loadUsers(); loadStats();
+};
+
+qs('#ch-search').oninput = e => { state.chSearch = e.target.value; renderChannels(); };
+qs('#usr-search').oninput = e => { state.usrSearch = e.target.value; renderUsers(); };
+qs('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
+
+/* ---------- init ---------- */
+function init(){
+  loadStats();
+  loadChannels();
+  loadUsers();
+  goTo('dashboard');
+}
+setInterval(loadStats, 6000);
+setInterval(loadChannels, 10000);
+setInterval(loadUsers, 6000); // يحدّث عدّاد أجهزة المشتركين حيّاً
+
+if (token) enter();
+</script>
 </body>
 </html>
