@@ -38,12 +38,86 @@ const db = new sqlite3.Database(path.join(__dirname, 'panel.db'), (err) => {
 const channelTypes = {};
 const adminSessions = {};
 const ffmpegProcesses = {};
+const deviceSessions = {}; // { [username]: Map<deviceKey, { ip, lastActive }> }
+const DEVICE_SESSION_TIMEOUT = 60000; // 60s بدون أي طلب مقطع = الجهاز انقطع
 const channelRetries = {};
 const channelAlwaysOn = {};
 const channelLastAccess = {};
 const MAX_CHANNEL_RETRIES = 5;
 const IDLE_TIMEOUT_MS = 120000;
 const IDLE_CHECK_MS = 30000;
+
+function getClientKey(req) {
+    const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
+    const deviceId = req.query.deviceId;
+    return (deviceId ? String(deviceId).slice(0, 64) : ip);
+}
+
+function pruneDeviceSessions(username) {
+    const map = deviceSessions[username];
+    if (!map) return;
+    const now = Date.now();
+    for (const [k, s] of map) {
+        if (now - s.lastActive > DEVICE_SESSION_TIMEOUT) map.delete(k);
+    }
+}
+
+// فرض الحد (طرد الأقدم عند الامتلاء) — يتبع نمط Xtream التقليدي
+function registerDeviceSession(username, maxConnections, key, ip) {
+    pruneDeviceSessions(username);
+    let map = deviceSessions[username];
+    if (!map) { map = new Map(); deviceSessions[username] = map; }
+    const now = Date.now();
+    if (map.has(key)) { map.set(key, { ip, lastActive: now }); return; }
+    const limit = parseInt(maxConnections) || 1;
+    if (map.size >= limit) {
+        let oldestKey = null, oldestT = Infinity;
+        for (const [k, s] of map) {
+            if (s.lastActive < oldestT) { oldestT = s.lastActive; oldestKey = k; }
+        }
+        if (oldestKey !== null) {
+            map.delete(oldestKey);
+            console.log(`[Device:${username}] kicked oldest device (${oldestKey}) to make room`);
+        }
+    }
+    map.set(key, { ip, lastActive: now });
+}
+
+// تحديث النشاط: بمفتاح الجهاز و/أو أي جلسة من نفس الـ IP (في حال أجرى المشغل طلب المقاطع بدون deviceId)
+function touchDeviceSession(username, key, ip) {
+    const map = deviceSessions[username];
+    if (!map) return;
+    const now = Date.now();
+    let touched = false;
+    if (key && map.has(key)) { map.set(key, { ip, lastActive: now }); touched = true; }
+    for (const [k, s] of map) {
+        if (s.ip === ip && k !== key) { map.set(k, { ip, lastActive: now }); touched = true; }
+    }
+    return touched;
+}
+
+function authUser(username, password, cb) {
+    db.get(`SELECT * FROM users WHERE username = ? AND password = ? AND status = 1`, [username, password], (err, user) => {
+        if (err || !user) return cb(null);
+        if (new Date(user.expire_date) < new Date()) return cb(null);
+        cb(user);
+    });
+}
+
+function serverInfoFor(req) {
+    const host = req.headers.host || `localhost:${PORT}`;
+    const hostName = host.split(':')[0];
+    return {
+        url: hostName,
+        port: String(PORT),
+        https_port: String(PORT),
+        server_protocol: 'http',
+        rtmp_port: '1935',
+        timezone: 'Asia/Riyadh',
+        timestamp_now: Math.floor(Date.now() / 1000),
+        time_now: new Date().toISOString().replace('T', ' ').slice(0, 19)
+    };
+}
 
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS users (
@@ -197,7 +271,7 @@ const rotChannels = [
 ];
 rotChannels.forEach(c => defaultChannels.push(mk(c[0], c[1], `${rotBase}${c[2]}`, groupRot, 0, 0)));
 
-app.use('/hls', express.static(__dirname));
+app.use('/hls', express.static(path.join(__dirname, 'dummy_sep')));
 
 const HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -488,12 +562,22 @@ function checkIdleChannels() {
 }
 setInterval(checkIdleChannels, IDLE_CHECK_MS);
 
+setInterval(() => {
+    for (const username of Object.keys(deviceSessions)) {
+        pruneDeviceSessions(username);
+        if (deviceSessions[username].size === 0) delete deviceSessions[username];
+    }
+}, 15000);
+
 app.get('/live/:username/:password/:channelId.m3u8', (req, res) => {
     const { username, password, channelId } = req.params;
 
-    db.get(`SELECT * FROM users WHERE username = ? AND password = ? AND status = 1`, [username, password], (err, user) => {
-        if (err || !user) return res.status(403).send('Unauthorized');
-        if (new Date(user.expire_date) < new Date()) return res.status(403).send('Expired');
+    authUser(username, password, (user) => {
+        if (!user) return res.status(403).send('Unauthorized');
+
+        const deviceKey = getClientKey(req);
+        const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
+        registerDeviceSession(username, user.max_connections, deviceKey, ip);
 
         db.get(`SELECT * FROM channels WHERE id = ?`, [channelId], (err, channel) => {
             if (!channel) return res.status(404).send('Not Found');
@@ -501,7 +585,7 @@ app.get('/live/:username/:password/:channelId.m3u8', (req, res) => {
             channelLastAccess[channelId] = Date.now();
 
             if (channel.url && channel.url.startsWith('dummy://')) {
-                return res.redirect('/hls/dummy_sep/index.m3u8');
+                return res.redirect(`/live/${username}/${password}/dummy_sep/index.m3u8`);
             }
 
             const alwaysOn = !!channelAlwaysOn[channelId];
@@ -517,7 +601,7 @@ app.get('/live/:username/:password/:channelId.m3u8', (req, res) => {
             const pollPlaylist = () => {
                 if (fs.existsSync(playlistPath)) {
                     channelLastAccess[channelId] = Date.now();
-                    return res.redirect(`/hls/${channelId}/index.m3u8`);
+                    return res.redirect(`/live/${username}/${password}/${channelId}/index.m3u8`);
                 }
                 if (!ffmpegProcesses[channelId]) {
                     return res.status(503).send('Stream offline (source unavailable)');
@@ -532,12 +616,47 @@ app.get('/live/:username/:password/:channelId.m3u8', (req, res) => {
     });
 });
 
+// خدمة ملفات البث (playlist + المقاطع) تحت مسار مصادق عليه — كل مقطع يمر بالتحقق ويجدّد الجلسة
+// (regex path لتوافق Express 4 و 5)
+app.get(/^\/live\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/, (req, res) => {
+    const username = req.params[0];
+    const password = req.params[1];
+    const channelId = req.params[2];
+    const file = req.params[3];
+
+    authUser(username, password, (user) => {
+        if (!user) return res.status(403).send('Unauthorized');
+
+        const deviceKey = getClientKey(req);
+        const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
+        touchDeviceSession(username, deviceKey, ip);
+
+        const channelDir = path.join(__dirname, channelId);
+        const fullPath = path.normalize(path.join(channelDir, file));
+        if (!fullPath.startsWith(channelDir + path.sep)) {
+            return res.status(403).send('Forbidden');
+        }
+        if (!fs.existsSync(fullPath)) return res.status(404).send('Not Found');
+
+        const ext = path.extname(file).toLowerCase();
+        if (ext === '.m3u8') {
+            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        } else {
+            res.setHeader('Content-Type', 'video/mp2t');
+        }
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.sendFile(fullPath);
+    });
+});
+
 app.get('/playlist/:username/:password/get.m3u', (req, res) => {
     const { username, password } = req.params;
     const host = req.headers.host;
 
     db.get(`SELECT * FROM users WHERE username = ? AND password = ? AND status = 1`, [username, password], (err, user) => {
         if (err || !user) return res.status(403).send('Unauthorized');
+        const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
+        registerDeviceSession(user.username, user.max_connections, getClientKey(req), ip);
 
         db.all(`SELECT * FROM channels ORDER BY rowid`, [], (err, channels) => {
             let m3uContent = `#EXTM3U\n`;
@@ -550,6 +669,86 @@ app.get('/playlist/:username/:password/get.m3u', (req, res) => {
             res.setHeader('Content-Type', 'audio/x-mpegurl');
             res.send(m3uContent);
         });
+    });
+});
+
+// ─── Xtream Codes API (لبرامج مثل 1stream / IPTV Smarters / OTT Navigator) ───
+app.get('/player_api.php', (req, res) => {
+    const { username, password, action } = req.query;
+    if (!username || !password) {
+        return res.json({ user_info: null });
+    }
+
+    authUser(username, password, (user) => {
+        if (!user) {
+            return res.json({
+                user_info: { auth: 0, status: 'Disabled', message: 'Invalid credentials or expired' },
+                server_info: serverInfoFor(req)
+            });
+        }
+
+        const userInfo = {
+            username: user.username,
+            password: user.password,
+            message: '',
+            auth: 1,
+            status: 'Active',
+            exp_date: Math.floor(new Date(user.expire_date).getTime() / 1000),
+            is_trial: '0',
+            active_cons: user.max_connections || 1,
+            created_at: '0',
+            max_connections: String(user.max_connections || 1),
+            allowed_output_formats: ['m3u8', 'ts']
+        };
+
+        const baseResp = { user_info: userInfo, server_info: serverInfoFor(req) };
+
+        if (!action) {
+            const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
+            registerDeviceSession(user.username, user.max_connections, getClientKey(req), ip);
+            return res.json(baseResp);
+        }
+
+        if (action === 'get_live_categories') {
+            db.all(`SELECT group_title, MIN(rowid) AS r FROM channels GROUP BY group_title ORDER BY r`, [], (err, rows) => {
+                const cats = (rows || []).map((g, i) => ({
+                    category_id: g.group_title || 'سيرفر 1',
+                    category_name: g.group_title || 'سيرفر 1',
+                    parent_id: 0
+                }));
+                return res.json(cats);
+            });
+            return;
+        }
+
+        if (action === 'get_live_streams') {
+            db.all(`SELECT * FROM channels ORDER BY rowid`, [], (err, channels) => {
+                const streams = (channels || []).map((ch, i) => ({
+                    num: i + 1,
+                    name: ch.name,
+                    stream_type: 'live',
+                    stream_id: ch.id,
+                    stream_icon: '',
+                    epg_channel_id: '',
+                    added: '',
+                    category_id: ch.group_title || 'سيرفر 1',
+                    custom_sid: '',
+                    tv_archive: 0,
+                    direct_source: '',
+                    tv_archive_duration: 0
+                }));
+                return res.json(streams);
+            });
+            return;
+        }
+
+        // لا يوجد VOD / Series / EPG حالياً — مصفوفات فارغة كي لا تتعطل التطبيقات
+        if (['get_vod_categories', 'get_vod_streams', 'get_series_categories', 'get_series',
+                'get_short_epg', 'get_simple_data_table'].includes(action)) {
+            return res.json([]);
+        }
+
+        return res.json([]);
     });
 });
 
@@ -603,7 +802,13 @@ app.post('/api/channels/delete', checkAdmin, (req, res) => {
 });
 
 app.get('/api/users', checkAdmin, (req, res) => {
-    db.all(`SELECT * FROM users`, [], (err, rows) => res.json(rows));
+    db.all(`SELECT * FROM users`, [], (err, rows) => {
+        (rows || []).forEach(u => {
+            pruneDeviceSessions(u.username);
+            u.connected = deviceSessions[u.username] ? deviceSessions[u.username].size : 0;
+        });
+        res.json(rows);
+    });
 });
 
 app.post('/api/users/add', checkAdmin, (req, res) => {
@@ -615,7 +820,10 @@ app.post('/api/users/add', checkAdmin, (req, res) => {
 });
 
 app.post('/api/users/delete', checkAdmin, (req, res) => {
-    db.run(`DELETE FROM users WHERE id = ?`, [req.body.id], () => res.json({ success: true }));
+    db.get(`SELECT username FROM users WHERE id = ?`, [req.body.id], (err, u) => {
+        if (u && deviceSessions[u.username]) delete deviceSessions[u.username];
+        db.run(`DELETE FROM users WHERE id = ?`, [req.body.id], () => res.json({ success: true }));
+    });
 });
 
 const adminHtml = `<!DOCTYPE html>
@@ -795,7 +1003,7 @@ const adminHtml = `<!DOCTYPE html>
                 return \`
                 <div class="p-2 mb-2 bg-dark rounded small">
                     <div class="d-flex justify-content-between align-items-center mb-1">
-                        <span>👤 <b>\${u.username}</b> | 🔑 \${u.password} | 📅 \${u.expire_date}</span>
+                        <span>👤 <b>\${u.username}</b> | 🔑 \${u.password} | 📅 \${u.expire_date} | 📡 <b>\${u.connected || 0}</b>/<b>\${u.max_connections || 1}</b> أجهزة</span>
                         <button class="btn btn-sm btn-danger py-0" onclick="deleteUser(\${u.id})">حذف</button>
                     </div>
                     <div class="input-group input-group-sm">
