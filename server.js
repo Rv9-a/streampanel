@@ -39,7 +39,11 @@ const channelTypes = {};
 const adminSessions = {};
 const ffmpegProcesses = {};
 const channelRetries = {};
+const channelAlwaysOn = {};
+const channelLastAccess = {};
 const MAX_CHANNEL_RETRIES = 5;
+const IDLE_TIMEOUT_MS = 120000;
+const IDLE_CHECK_MS = 30000;
 
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS users (
@@ -56,40 +60,85 @@ db.serialize(() => {
         name TEXT,
         url TEXT,
         stream_type INTEGER DEFAULT 0,
-        group_title TEXT DEFAULT 'سيرفر 1'
+        group_title TEXT DEFAULT 'سيرفر 1',
+        always_on INTEGER DEFAULT 0
     )`);
 
-    const defaultChannels = [
-        ['bein1', 'beIN Sports 1 FHD', 'https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN1FHD.m3u8', 0, 'سيرفر 1'],
-        ['bein2', 'beIN Sports 2 FHD', 'https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN2FHD.m3u8', 0, 'سيرفر 1'],
-        ['bein3', 'beIN Sports 3 FHD', 'https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN3FHD.m3u8', 0, 'سيرفر 1'],
-        ['bein4', 'beIN Sports 4 FHD', 'https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN4FHD.m3u8', 0, 'سيرفر 1'],
-        ['bein5', 'beIN Sports 5 FHD', 'https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN5FHD.m3u8', 0, 'سيرفر 1'],
-        ['bein6', 'beIN Sports 6 FHD', 'https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN6FHD.m3u8', 0, 'سيرفر 1'],
-        ['bein7', 'beIN Sports 7 FHD', 'https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN7FHD.m3u8', 0, 'سيرفر 1'],
-        ['rvtv_event', 'Rvtv (live event)', 'rtmp://127.0.0.1:1935/live/event', 0, 'سيرفر 1'],
-        ['bein1_4k', 'beIN Sports 1 4K', 'https://prime-fast.sytes.net/prime-tv/stream/74.m3u8', 1, 'سيرفر 2'],
-        ['bein2_4k', 'beIN Sports 2 4K', 'https://prime-fast.sytes.net/prime-tv/stream/75.m3u8', 1, 'سيرفر 2'],
-        ['bein3_4k', 'beIN Sports 3 4K', 'https://prime-fast.sytes.net/prime-tv/stream/76.m3u8', 1, 'سيرفر 2'],
-        ['bein4_4k', 'beIN Sports 4 4K', 'https://prime-fast.sytes.net/prime-tv/stream/77.m3u8', 1, 'سيرفر 2'],
-        ['bein5_4k', 'beIN Sports 5 4K', 'https://prime-fast.sytes.net/prime-tv/stream/78.m3u8', 1, 'سيرفر 2'],
-        ['bein6_4k', 'beIN Sports 6 4K', 'https://prime-fast.sytes.net/prime-tv/stream/79.m3u8', 1, 'سيرفر 2'],
-        ['bein7_4k', 'beIN Sports 7 4K', 'https://prime-fast.sytes.net/prime-tv/stream/80.m3u8', 1, 'سيرفر 2'],
-        ['bein8_4k', 'beIN Sports 8 4K', 'https://prime-fast.sytes.net/prime-tv/stream/81.m3u8', 1, 'سيرفر 2'],
-        ['bein9_4k', 'beIN Sports 9 4K', 'https://prime-fast.sytes.net/prime-tv/stream/82.m3u8', 1, 'سيرفر 2']
-    ];
+    db.all(`PRAGMA table_info(channels)`, (err, cols) => {
+        if (cols && !cols.some(c => c.name === 'always_on')) {
+            db.run(`ALTER TABLE channels ADD COLUMN always_on INTEGER DEFAULT 0`, (e) => {
+                if (!e) console.log('[DB] migrated: added always_on column');
+            });
+        }
+    });
 
-    const stmt = db.prepare(`INSERT OR REPLACE INTO channels (id, name, url, stream_type, group_title) VALUES (?, ?, ?, ?, ?)`);
+    const groupRV = 'BEIN RV';
+    const groupSS = 'bein sport ss';
+    const groupSrc = 'bein sport مصدر خاص';
+    const groupAlK = 'ALKASS الكأس';
+    const groupAlwan = 'ALWAN SPORT';
+
+    const defaultChannels = [];
+    const mk = (id, name, url, group, always = 0, streamType = 1) => [id, name, url, streamType, group, always];
+
+    for (let i = 1; i <= 7; i++) {
+        defaultChannels.push(mk(`bein${i}`, `beIN Sports ${i} FHD`, `https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN${i}FHD.m3u8`, groupRV, 1, 0));
+    }
+    defaultChannels.push(mk('rvtv_event', 'Rvtv (live event)', 'rtmp://127.0.0.1:1935/live/event', groupRV, 1, 0));
+
+    const ssBase = 'http://pro.netmos.ovh:7355/live/EXMOQNS9Y30998CX0/LKHSB87278DOKCPP/';
+    defaultChannels.push(mk('bein_ss_4k_true', 'bein 4K (true 4k)', `${ssBase}158960.ts`, `${groupSS}/4K`));
+    defaultChannels.push(mk('bein_ss_4k_event', 'bein 4K (only event)', `${ssBase}158961.ts`, `${groupSS}/4K`));
+    defaultChannels.push(mk('bein_ss_news', 'bein news', `${ssBase}83618.ts`, `${groupSS}/متنوعة`));
+    defaultChannels.push(mk('bein_ss_global', 'bein global', `${ssBase}231675.ts`, `${groupSS}/متنوعة`));
+
+    const ssSd = ['102890', '102891', '108484', '108485', '158897', '102895', '108486', '158898', '158899'];
+    ssSd.forEach((u, i) => defaultChannels.push(mk(`bein_ss_sd${i + 1}`, `beinsport ${i + 1} SD`, `${ssBase}${u}.ts`, `${groupSS}/SD`)));
+    const ssHd = ['158866', '158889', '158890', '158891', '158892', '158893', '158894', '158895', '158896'];
+    ssHd.forEach((u, i) => defaultChannels.push(mk(`bein_ss_hd${i + 1}`, `beinsport ${i + 1} HD`, `${ssBase}${u}.ts`, `${groupSS}/HD`)));
+    const ssFhd = ['158867', '158900', '158901', '158902', '158903', '158904', '158905', '158906', '158907'];
+    ssFhd.forEach((u, i) => defaultChannels.push(mk(`bein_ss_fhd${i + 1}`, `beinsport ${i + 1} FHD`, `${ssBase}${u}.ts`, `${groupSS}/FHD`)));
+    const ss4k = ['221764', '221765', '221766', '221767', 'https://prime-fast.sytes.net/prime-tv/stream/78.m3u8', '221769', '221770', '221771'];
+    ss4k.forEach((u, i) => {
+        const url = u.startsWith('http') ? u : `${ssBase}${u}.ts`;
+        defaultChannels.push(mk(`bein_ss_4k${i + 1}`, `beinsport 4K ${i + 1} FHD`, url, `${groupSS}/4K`));
+    });
+
+    const pfBase = 'https://prime-fast.sytes.net/prime-tv/stream/';
+    for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_src4k${i}`, `bein ${i} 4K`, `${pfBase}${73 + i}.m3u8`, `${groupSrc}/4K`));
+    for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcuhd${i}`, `bein sports ${i} (UHD)`, `http://fackyou-cdn5.cfd/BEIN-${i}/index.m3u8`, `${groupSrc}/UHD`));
+    for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcfhd${i}`, `bein sports ${i} FHD`, `${pfBase}${62 + i}.m3u8`, `${groupSrc}/FHD`));
+    for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srchd${i}`, `bein sports ${i} HD`, `${pfBase}${51 + i}.m3u8`, `${groupSrc}/HD`));
+    for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcsd${i}`, `bein sports ${i} SD`, `${pfBase}${24 + i}.m3u8`, `${groupSrc}/SD`));
+    for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcmob${i}`, `bein sports ${i}`, `http://82.39.115.26:3000/live/${i}.m3u8`, `${groupSrc}/وقت المباريات`));
+
+    const kWords = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+    for (let i = 0; i < 8; i++) defaultChannels.push(mk(`alkass${i + 1}`, `الكأس ${i + 1}`, `https://alkass.kianezidi.workers.dev/${kWords[i]}.m3u8`, groupAlK));
+
+    const alwanHd = ['232595', '232596', '232597', '232598', '232599', '232600'];
+    alwanHd.forEach((u, i) => defaultChannels.push(mk(`alwan_hd${i + 1}`, `ALWAN SPORT ${i + 1} HD`, `${ssBase}${u}.ts`, `${groupAlwan}/HD`)));
+    const alwan4k = ['232601', '232602', '232603', '232604', '232605', '232606'];
+    alwan4k.forEach((u, i) => defaultChannels.push(mk(`alwan_4k${i + 1}`, `ALWAN SPORT ${i + 1} 4K`, `${ssBase}${u}.ts`, `${groupAlwan}/4K`)));
+
+    const stmt = db.prepare(`INSERT OR REPLACE INTO channels (id, name, url, stream_type, group_title, always_on) VALUES (?, ?, ?, ?, ?, ?)`);
     defaultChannels.forEach(c => stmt.run(c));
     stmt.finalize();
 
-    db.run(`DELETE FROM channels WHERE id LIKE 'alwan%' OR id LIKE 'besp%' OR id IN ('4k')`);
+    console.log(`[DB] default channels ready: ${defaultChannels.length} total`);
+
+    db.run(`DELETE FROM channels WHERE id LIKE 'besp%'
+            OR id IN ('4k')
+            OR (id LIKE 'alwan%' AND id NOT LIKE 'alwan_hd%' AND id NOT LIKE 'alwan_4k%')
+            OR id IN ('bein1_4k', 'bein2_4k', 'bein3_4k', 'bein4_4k', 'bein5_4k', 'bein6_4k', 'bein7_4k', 'bein8_4k', 'bein9_4k')`);
 
     db.all(`SELECT * FROM channels`, [], (err, rows) => {
         if (!err && rows) {
             rows.forEach(ch => {
                 channelTypes[ch.id] = ch.stream_type;
-                startChannelProcess(ch.id, ch.url, ch.stream_type);
+                channelAlwaysOn[ch.id] = !!ch.always_on;
+                if (ch.always_on) {
+                    startChannelProcess(ch.id, ch.url, ch.stream_type, true);
+                }
             });
         }
     });
@@ -153,8 +202,11 @@ app.get('/proxy-seg', async (req, res) => {
     }
 });
 
-function startChannelProcess(id, url, streamType = 0) {
+function startChannelProcess(id, url, streamType = 0, alwaysOn = false) {
     if (ffmpegProcesses[id]) return;
+
+    channelAlwaysOn[id] = alwaysOn;
+    if (!alwaysOn) console.log(`[On-Demand start - ${id}]: starting ffmpeg`);
 
     const channelDir = path.join(__dirname, id);
     if (!fs.existsSync(channelDir)) {
@@ -233,6 +285,15 @@ function startChannelProcess(id, url, streamType = 0) {
 
 function scheduleChannelRetry(id, isRtmp = false) {
     if (ffmpegProcesses[id]) return;
+
+    const alwaysOn = !!channelAlwaysOn[id];
+
+    if (!alwaysOn && Date.now() - (channelLastAccess[id] || 0) > 15000) {
+        channelRetries[id] = 0;
+        console.log(`[FFmpeg idle - ${id}]: on-demand with no active viewers, staying stopped`);
+        return;
+    }
+
     const attempt = channelRetries[id] || 0;
 
     if (isRtmp) {
@@ -241,30 +302,61 @@ function scheduleChannelRetry(id, isRtmp = false) {
         console.log(`[FFmpeg retry - ${id}]: RTMP waiting for source, retry in ${delay / 1000}s`);
         setTimeout(() => {
             db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
-                if (ch && !ffmpegProcesses[id]) startChannelProcess(ch.id, ch.url, ch.stream_type);
+                if (ch && !ffmpegProcesses[id]) startChannelProcess(ch.id, ch.url, ch.stream_type, !!channelAlwaysOn[id]);
             });
         }, delay);
         return;
     }
 
-    if (attempt >= MAX_CHANNEL_RETRIES) {
-        console.error(`[FFmpeg stop - ${id}]: max retries reached, disabling`);
-        delete channelRetries[id];
+    const maxRetries = alwaysOn ? MAX_CHANNEL_RETRIES : 3;
+    if (attempt >= maxRetries) {
+        console.error(`[FFmpeg stop - ${id}]: max retries reached, stopping`);
+        channelRetries[id] = 0;
         return;
     }
     channelRetries[id] = attempt + 1;
-    const delays = [3000, 15000, 30000, 60000, 120000];
+    const delays = alwaysOn ? [3000, 15000, 30000, 60000, 120000] : [3000, 6000, 12000];
     const delay = delays[Math.min(attempt, delays.length - 1)];
-    console.log(`[FFmpeg retry - ${id}]: attempt ${attempt + 1}/${MAX_CHANNEL_RETRIES} in ${delay / 1000}s`);
+    console.log(`[FFmpeg retry - ${id}]: attempt ${attempt + 1}/${maxRetries} in ${delay / 1000}s`);
     setTimeout(() => {
         db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
             if (ch && !ffmpegProcesses[id]) {
                 channelRetries[id] = 0;
-                startChannelProcess(ch.id, ch.url, ch.stream_type);
+                startChannelProcess(ch.id, ch.url, ch.stream_type, !!channelAlwaysOn[ch.id]);
             }
         });
     }, delay);
 }
+
+function cleanChannelDir(id) {
+    const dir = path.join(__dirname, id);
+    if (!fs.existsSync(dir)) return;
+    try {
+        fs.readdirSync(dir).forEach(f => {
+            if (f.endsWith('.ts') || f === 'index.m3u8') {
+                fs.unlinkSync(path.join(dir, f));
+            }
+        });
+    } catch (err) {
+        console.error(`[cleanDir - ${id}]: ${err.message}`);
+    }
+}
+
+function checkIdleChannels() {
+    const now = Date.now();
+    for (const id of Object.keys(ffmpegProcesses)) {
+        if (channelAlwaysOn[id]) continue;
+        const last = channelLastAccess[id] || 0;
+        if (now - last > IDLE_TIMEOUT_MS) {
+            console.log(`[On-Demand stop - ${id}]: idle ${Math.round((now - last) / 1000)}s, stopping ffmpeg`);
+            try { ffmpegProcesses[id].kill('SIGKILL'); } catch (e) { /* already gone */ }
+            delete ffmpegProcesses[id];
+            delete channelRetries[id];
+            cleanChannelDir(id);
+        }
+    }
+}
+setInterval(checkIdleChannels, IDLE_CHECK_MS);
 
 app.get('/live/:username/:password/:channelId.m3u8', (req, res) => {
     const { username, password, channelId } = req.params;
@@ -276,12 +368,31 @@ app.get('/live/:username/:password/:channelId.m3u8', (req, res) => {
         db.get(`SELECT * FROM channels WHERE id = ?`, [channelId], (err, channel) => {
             if (!channel) return res.status(404).send('Not Found');
 
-            const playlistPath = path.join(__dirname, channelId, 'index.m3u8');
-            if (fs.existsSync(playlistPath)) {
-                return res.redirect(`/hls/${channelId}/index.m3u8`);
-            } else {
-                res.status(503).send('Stream Building or Offline...');
+            channelLastAccess[channelId] = Date.now();
+            const alwaysOn = !!channelAlwaysOn[channelId];
+
+            if (!ffmpegProcesses[channelId]) {
+                if (!alwaysOn) cleanChannelDir(channelId);
+                startChannelProcess(channelId, channel.url, channel.stream_type, alwaysOn);
             }
+
+            const playlistPath = path.join(__dirname, channelId, 'index.m3u8');
+            const startedAt = Date.now();
+
+            const pollPlaylist = () => {
+                if (fs.existsSync(playlistPath)) {
+                    channelLastAccess[channelId] = Date.now();
+                    return res.redirect(`/hls/${channelId}/index.m3u8`);
+                }
+                if (!ffmpegProcesses[channelId]) {
+                    return res.status(503).send('Stream offline (source unavailable)');
+                }
+                if (Date.now() - startedAt > 15000) {
+                    return res.status(503).send('Stream is still building, try again...');
+                }
+                setTimeout(pollPlaylist, 1000);
+            };
+            pollPlaylist();
         });
     });
 });
@@ -331,12 +442,14 @@ app.get('/api/channels', checkAdmin, (req, res) => {
 app.post('/api/channels/add', checkAdmin, (req, res) => {
     const { id, name, url, stream_type, group_title } = req.body;
     const sType = parseInt(stream_type) || 0;
+    const alwaysOn = req.body.always_on ? 1 : 0;
     
-    db.run(`INSERT OR REPLACE INTO channels (id, name, url, stream_type, group_title) VALUES (?, ?, ?, ?, ?)`, 
-        [id, name, url, sType, group_title || 'سيرفر 1'], 
+    db.run(`INSERT OR REPLACE INTO channels (id, name, url, stream_type, group_title, always_on) VALUES (?, ?, ?, ?, ?, ?)`, 
+        [id, name, url, sType, group_title || 'سيرفر 1', alwaysOn], 
         () => {
             channelTypes[id] = sType;
-            startChannelProcess(id, url, sType);
+            channelAlwaysOn[id] = !!alwaysOn;
+            if (alwaysOn) startChannelProcess(id, url, sType, true);
             res.json({ success: true });
         });
 });
@@ -344,10 +457,13 @@ app.post('/api/channels/add', checkAdmin, (req, res) => {
 app.post('/api/channels/delete', checkAdmin, (req, res) => {
     const { id } = req.body;
     if (ffmpegProcesses[id]) {
-        ffmpegProcesses[id].kill('SIGKILL');
+        try { ffmpegProcesses[id].kill('SIGKILL'); } catch (e) {}
         delete ffmpegProcesses[id];
     }
     delete channelTypes[id];
+    delete channelAlwaysOn[id];
+    delete channelLastAccess[id];
+    delete channelRetries[id];
     db.run(`DELETE FROM channels WHERE id = ?`, [id], () => res.json({ success: true }));
 });
 
@@ -406,12 +522,18 @@ const adminHtml = `<!DOCTYPE html>
                     <form id="channel-form" class="row g-2">
                         <div class="col-md-6"><input type="text" id="ch_id" class="form-control" placeholder="معرّف (rvtv_event)" required></div>
                         <div class="col-md-6"><input type="text" id="ch_name" class="form-control" placeholder="اسم القناة" required></div>
-                        <div class="col-12"><input type="text" id="ch_group" class="form-control" placeholder="اسم السيرفر" value="سيرفر 1" required></div>
+                        <div class="col-12"><input type="text" id="ch_group" class="form-control" placeholder="المجموعة (استخدم / للتصنيف)" value="BEIN RV" required></div>
                         <div class="col-12"><input type="url" id="ch_url" class="form-control" placeholder="رابط Stream الأصلي أو RTMP" required></div>
                         <div class="col-12">
                             <select id="ch_stream_type" class="form-select">
                                 <option value="0" selected>🔒 مصدر محمي (يحتاج بروكسي)</option>
                                 <option value="1">📡 رابط مباشر (بدون بروكسي)</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <select id="ch_always" class="form-select">
+                                <option value="0" selected>⏸ عند الطلب فقط (يبدأ عند أول مشاهد)</option>
+                                <option value="1">🔁 يعمل دائماً بالخلفية</option>
                             </select>
                         </div>
                         <button type="submit" class="btn btn-primary w-100 mt-2">إضافة القناة</button>
@@ -494,6 +616,7 @@ const adminHtml = `<!DOCTYPE html>
                     <div>
                         <strong>\${c.name}</strong> (\${c.id}) 
                         <span class="badge bg-primary">\${c.group_title}</span>
+                        <span class="badge \${c.always_on ? 'bg-warning text-dark' : 'bg-info'}">\${c.always_on ? '🔁 دائماً' : '⏸ عند الطلب'}</span>
                         <span class="badge \${c.running ? 'bg-success' : 'bg-secondary'}">\${c.running ? '🟢 تعمل' : '⚪ خاملة'}</span>
                     </div>
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteChannel('\${c.id}')">حذف</button>
@@ -521,7 +644,8 @@ const adminHtml = `<!DOCTYPE html>
                     name: document.getElementById('ch_name').value,
                     group_title: document.getElementById('ch_group').value,
                     url: document.getElementById('ch_url').value,
-                    stream_type: document.getElementById('ch_stream_type').value
+                    stream_type: document.getElementById('ch_stream_type').value,
+                    always_on: document.getElementById('ch_always').value === '1'
                 })
             });
             e.target.reset();
