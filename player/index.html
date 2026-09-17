@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>مشغل IPTV</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div class="login" id="login">
+  <div class="login-card">
+    <div class="brand-ic">📺</div>
+    <div class="login-title">مشغل IPTV</div>
+    <div class="login-sub">أدخل بيانات حسابك لمشاهدة القنوات</div>
+
+    <div class="tabs">
+      <div class="tab active" data-mode="xtream">حساب Xtream</div>
+      <div class="tab" data-mode="m3u">رابط M3U</div>
+    </div>
+
+    <div class="login-err" id="login-err"></div>
+
+    <form id="xtream-form">
+      <div class="field"><label>اسم المستخدم</label><input class="input" id="x-user" autocomplete="username" required></div>
+      <div class="field"><label>كلمة السر</label><input class="input" type="password" id="x-pass" autocomplete="current-password" required></div>
+      <label class="check"><input type="checkbox" id="remember"> تذكّر بيانات الدخول</label>
+      <button type="submit" class="btn btn-primary btn-block" id="x-btn">دخول</button>
+    </form>
+
+    <form id="m3u-form" class="hidden">
+      <div class="field"><label>رابط ملف M3U</label><input class="input" id="m-url" dir="ltr" placeholder="http://host/playlist/user/pass/get.m3u" required></div>
+      <label class="check"><input type="checkbox" id="remember2"> تذكّر الرابط</label>
+      <button type="submit" class="btn btn-primary btn-block" id="m-btn">تحميل القنوات</button>
+    </form>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div class="app hidden" id="app">
+  <header class="topbar">
+    <button class="menu-btn" id="menu-btn">☰</button>
+    <div class="logo"><span class="logo-ic">📺</span> مشغل IPTV</div>
+    <div class="search-wrap">
+      <span class="search-ic">🔍</span>
+      <input class="input" id="search" placeholder="ابحث عن قناة...">
+    </div>
+    <div class="user-badge"><span class="dot"></span><span id="who">—</span></div>
+    <button class="icon-btn" id="logout" title="خروج">⏻</button>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="side-h">المكتبة</div>
+      <div id="specialcats"></div>
+      <div class="side-h" style="margin-top:16px">المجموعات</div>
+      <div id="cats"></div>
+    </aside>
+
+    <main class="content">
+      <div class="content-h">
+        <h2 id="list-title">كل القنوات</h2>
+        <span class="n" id="list-count"></span>
+      </div>
+      <div class="grid" id="grid"></div>
+    </main>
+  </div>
+</div>
+
+<!-- ============ PLAYER ============ -->
+<div class="player-view hidden" id="player-view">
+  <div class="pv-top">
+    <button class="icon-btn" id="back" title="رجوع">✕</button>
+    <div>
+      <div class="pv-title" id="pv-name">—</div>
+      <div class="pv-sub" id="pv-group">—</div>
+    </div>
+    <div class="pv-actions">
+      <button class="icon-btn" id="prev" title="القناة السابقة">⏮</button>
+      <button class="icon-btn" id="next" title="القناة التالية">⏭</button>
+      <button class="icon-btn" id="fav" title="إضافة للمفضلة">☆</button>
+      <button class="icon-btn" id="reload" title="إعادة الاتصال">↻</button>
+    </div>
+  </div>
+  <div class="pv-stage">
+    <div class="pv-box"><div class="artplayer-app" id="art"></div></div>
+  </div>
+  <div class="pv-info">
+    <span>الحالة: <span class="k" id="pv-status">جارِ الاتصال...</span></span>
+    <span>الجودة: <span class="k" id="pv-quality">تلقائي</span></span>
+    <span>الأجهزة: <span class="k" id="pv-cons">—</span></span>
+    <span class="badge badge-ok" id="pv-hint">اضغط N للقناة التالية · P للسابقة</span>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<script src="vendor/hls.min.js"></script>
+<script src="vendor/artplayer.js"></script>
+<script src="vendor/artplayer-i18n-ar.js"></script>
+<script src="vendor/artplayer-plugin-hls-control.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

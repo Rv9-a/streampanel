@@ -203,30 +203,34 @@ db.serialize(() => {
                 if (e) console.error(`[DB] insert error for ${c[0]}:`, e.message);
             });
         });
-        stmt.finalize();
 
-        console.log(`[DB] default channels ready: ${defaultChannels.length} total`);
+        // مهم: التهيئة (channelTypes / channelAlwaysOn / خرائط Xtream) يجب أن تجري
+        // بعد اكتمال كل الإدخالات — وإلا حدث سباق غير متزامن فتُبنى الخرائط على جزء
+        // من القنوات فقط (مما يعطّل placeholder و stream_id الرقمي لمعظم القنوات).
+        stmt.finalize(() => {
+            console.log(`[DB] default channels ready: ${defaultChannels.length} total`);
 
-        db.run(`DELETE FROM channels WHERE id LIKE 'besp%'
-                OR id IN ('4k')
-                OR (id LIKE 'alwan%' AND id NOT LIKE 'alwan_hd%' AND id NOT LIKE 'alwan_4k%')
-                OR id IN ('bein1_4k', 'bein2_4k', 'bein3_4k', 'bein4_4k', 'bein5_4k', 'bein6_4k', 'bein7_4k', 'bein8_4k', 'bein9_4k')`, (cleanErr) => {
-            if (cleanErr) console.error('[DB] cleanup error:', cleanErr.message);
-        });
+            db.run(`DELETE FROM channels WHERE id LIKE 'besp%'
+                    OR id IN ('4k')
+                    OR (id LIKE 'alwan%' AND id NOT LIKE 'alwan_hd%' AND id NOT LIKE 'alwan_4k%')
+                    OR id IN ('bein1_4k', 'bein2_4k', 'bein3_4k', 'bein4_4k', 'bein5_4k', 'bein6_4k', 'bein7_4k', 'bein8_4k', 'bein9_4k')`, (cleanErr) => {
+                if (cleanErr) console.error('[DB] cleanup error:', cleanErr.message);
 
-        db.all(`SELECT * FROM channels`, [], (err, rows) => {
-            if (!err && rows) {
-                const alwaysChannels = rows.filter(r => r.always_on);
-                if (alwaysChannels.length) console.log(`[DB] starting ${alwaysChannels.length} always-on channels at boot`);
-                rows.forEach(ch => {
-                    channelTypes[ch.id] = ch.stream_type;
-                    channelAlwaysOn[ch.id] = !!ch.always_on;
-                    if (ch.always_on) {
-                        startChannelProcess(ch.id, ch.url, ch.stream_type, true, ch.group_title);
-                    }
+                db.all(`SELECT * FROM channels`, [], (err, rows) => {
+                    if (err) { console.error('[DB] boot load error:', err.message); return; }
+                    const alwaysChannels = (rows || []).filter(r => r.always_on);
+                    if (alwaysChannels.length) console.log(`[DB] starting ${alwaysChannels.length} always-on channels at boot`);
+                    (rows || []).forEach(ch => {
+                        channelTypes[ch.id] = ch.stream_type;
+                        channelAlwaysOn[ch.id] = !!ch.always_on;
+                        if (ch.always_on) {
+                            startChannelProcess(ch.id, ch.url, ch.stream_type, true, ch.group_title);
+                        }
+                    });
+                    rebuildXtreamMaps();
+                    console.log(`[DB] boot init complete: ${(rows || []).length} channels, ${Object.keys(channelTypes).length} typed`);
                 });
-                rebuildXtreamMaps();
-            }
+            });
         });
     });
 });
@@ -320,6 +324,9 @@ const rotChannels = [
 rotChannels.forEach(c => defaultChannels.push(mk(c[0], c[1], `${rotBase}${c[2]}`, groupRot, 0, 0)));
 
 app.use('/hls', express.static(path.join(__dirname, 'dummy_sep')));
+
+// مشغل IPTV عبر المتصفح (ملفات ثابتة فقط — لا يضيف أي حمل على السيرفر ولا يمس مسارات البث)
+app.use('/player', express.static(path.join(__dirname, 'player')));
 
 const HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
