@@ -39,6 +39,8 @@ const channelTypes = {};
 const adminSessions = {};
 const ffmpegProcesses = {};
 const deviceSessions = {}; // { [username]: Map<deviceKey, { ip, lastActive }> }
+const streamIdMap = {}; // { <numeric xtream id>: channelId string }
+const categoryIdMap = {}; // { <numeric category id>: group_title }
 const DEVICE_SESSION_TIMEOUT = 60000; // 60s بدون أي طلب مقطع = الجهاز انقطع
 const channelRetries = {};
 const channelAlwaysOn = {};
@@ -51,6 +53,21 @@ function getClientKey(req) {
     const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
     const deviceId = req.query.deviceId;
     return (deviceId ? String(deviceId).slice(0, 64) : ip);
+}
+
+// يبني خارطة الأرقام من القنوات (لتطبيقات Xtream التي تتطلب stream_id رقمياً)
+function rebuildXtreamMaps(cb) {
+    db.all(`SELECT rowid, id, group_title FROM channels ORDER BY rowid`, [], (err, rows) => {
+        Object.keys(streamIdMap).forEach(k => delete streamIdMap[k]);
+        Object.keys(categoryIdMap).forEach(k => delete categoryIdMap[k]);
+        (rows || []).forEach(r => {
+            streamIdMap[r.rowid] = r.id;
+            if (!(r.group_title in categoryIdMap)) {
+                categoryIdMap[r.group_title] = Object.keys(categoryIdMap).length + 1;
+            }
+        });
+        if (cb) cb();
+    });
 }
 
 function pruneDeviceSessions(username) {
@@ -178,6 +195,7 @@ db.serialize(() => {
                         startChannelProcess(ch.id, ch.url, ch.stream_type, true, ch.group_title);
                     }
                 });
+                rebuildXtreamMaps();
             }
         });
     });
@@ -570,7 +588,10 @@ setInterval(() => {
 }, 15000);
 
 const serveChannelPlaylist = (req, res) => {
-    const { username, password, channelId } = req.params;
+    const username = req.params.username;
+    const password = req.params.password;
+    const rawChannelId = req.params.channelId;
+    const channelId = streamIdMap[rawChannelId] || rawChannelId;
 
     authUser(username, password, (user) => {
         if (!user) return res.status(403).send('Unauthorized');
@@ -740,8 +761,8 @@ app.all(['/player_api.php', '/panel_api.php'], (req, res) => {
 
         if (action === 'get_live_categories') {
             db.all(`SELECT group_title, MIN(rowid) AS r FROM channels GROUP BY group_title ORDER BY r`, [], (err, rows) => {
-                const cats = (rows || []).map((g, i) => ({
-                    category_id: g.group_title || 'سيرفر 1',
+                const cats = (rows || []).map((g) => ({
+                    category_id: categoryIdMap[g.group_title] || (g.group_title || 'سيرفر 1'),
                     category_name: g.group_title || 'سيرفر 1',
                     parent_id: 0
                 }));
@@ -751,16 +772,16 @@ app.all(['/player_api.php', '/panel_api.php'], (req, res) => {
         }
 
         if (action === 'get_live_streams') {
-            db.all(`SELECT * FROM channels ORDER BY rowid`, [], (err, channels) => {
+            db.all(`SELECT rowid, * FROM channels ORDER BY rowid`, [], (err, channels) => {
                 const streams = (channels || []).map((ch, i) => ({
                     num: i + 1,
                     name: ch.name,
                     stream_type: 'live',
-                    stream_id: ch.id,
+                    stream_id: ch.rowid,
                     stream_icon: '',
                     epg_channel_id: '',
                     added: '',
-                    category_id: ch.group_title || 'سيرفر 1',
+                    category_id: categoryIdMap[ch.group_title] || (ch.group_title || 'سيرفر 1'),
                     custom_sid: '',
                     tv_archive: 0,
                     direct_source: '',
@@ -851,7 +872,7 @@ app.post('/api/channels/add', checkAdmin, (req, res) => {
             channelTypes[id] = sType;
             channelAlwaysOn[id] = !!alwaysOn;
             if (alwaysOn) startChannelProcess(id, url, sType, true, group_title || 'سيرفر 1');
-            res.json({ success: true });
+            rebuildXtreamMaps(() => res.json({ success: true }));
         });
 });
 
@@ -865,7 +886,9 @@ app.post('/api/channels/delete', checkAdmin, (req, res) => {
     delete channelAlwaysOn[id];
     delete channelLastAccess[id];
     delete channelRetries[id];
-    db.run(`DELETE FROM channels WHERE id = ?`, [id], () => res.json({ success: true }));
+    db.run(`DELETE FROM channels WHERE id = ?`, [id], () => {
+        rebuildXtreamMaps(() => res.json({ success: true }));
+    });
 });
 
 app.get('/api/users', checkAdmin, (req, res) => {
