@@ -64,13 +64,50 @@ db.serialize(() => {
         always_on INTEGER DEFAULT 0
     )`);
 
-    db.all(`PRAGMA table_info(channels)`, (err, cols) => {
-        if (cols && !cols.some(c => c.name === 'always_on')) {
-            db.run(`ALTER TABLE channels ADD COLUMN always_on INTEGER DEFAULT 0`, (e) => {
-                if (!e) console.log('[DB] migrated: added always_on column');
-            });
+    db.run(`ALTER TABLE channels ADD COLUMN always_on INTEGER DEFAULT 0`, (migErr) => {
+        if (!migErr) {
+            console.log('[DB] migrated: added always_on column');
+        } else if (migErr.message && migErr.message.includes('duplicate column')) {
+            // العمود موجود أصلاً — قاعدة بيانات أخرى أو جدول جديد يشمل العمود
+        } else {
+            console.error('[DB] migration check:', migErr.message);
         }
+
+        const stmt = db.prepare(`INSERT OR REPLACE INTO channels (id, name, url, stream_type, group_title, always_on) VALUES (?, ?, ?, ?, ?, ?)`);
+        stmt.on('error', (e) => {
+            console.error(`[DB] channel insert error:`, e.message);
+        });
+        defaultChannels.forEach(c => {
+            stmt.run(c, (e) => {
+                if (e) console.error(`[DB] insert error for ${c[0]}:`, e.message);
+            });
+        });
+        stmt.finalize();
+
+        console.log(`[DB] default channels ready: ${defaultChannels.length} total`);
+
+        db.run(`DELETE FROM channels WHERE id LIKE 'besp%'
+                OR id IN ('4k')
+                OR (id LIKE 'alwan%' AND id NOT LIKE 'alwan_hd%' AND id NOT LIKE 'alwan_4k%')
+                OR id IN ('bein1_4k', 'bein2_4k', 'bein3_4k', 'bein4_4k', 'bein5_4k', 'bein6_4k', 'bein7_4k', 'bein8_4k', 'bein9_4k')`, (cleanErr) => {
+            if (cleanErr) console.error('[DB] cleanup error:', cleanErr.message);
+        });
+
+        db.all(`SELECT * FROM channels`, [], (err, rows) => {
+            if (!err && rows) {
+                const alwaysChannels = rows.filter(r => r.always_on);
+                if (alwaysChannels.length) console.log(`[DB] starting ${alwaysChannels.length} always-on channels at boot`);
+                rows.forEach(ch => {
+                    channelTypes[ch.id] = ch.stream_type;
+                    channelAlwaysOn[ch.id] = !!ch.always_on;
+                    if (ch.always_on) {
+                        startChannelProcess(ch.id, ch.url, ch.stream_type, true);
+                    }
+                });
+            }
+        });
     });
+});
 
     const groupRV = 'BEIN RV';
     const groupSS = 'bein sport ss';
@@ -119,30 +156,6 @@ db.serialize(() => {
     alwanHd.forEach((u, i) => defaultChannels.push(mk(`alwan_hd${i + 1}`, `ALWAN SPORT ${i + 1} HD`, `${ssBase}${u}.ts`, `${groupAlwan}/HD`)));
     const alwan4k = ['232601', '232602', '232603', '232604', '232605', '232606'];
     alwan4k.forEach((u, i) => defaultChannels.push(mk(`alwan_4k${i + 1}`, `ALWAN SPORT ${i + 1} 4K`, `${ssBase}${u}.ts`, `${groupAlwan}/4K`)));
-
-    const stmt = db.prepare(`INSERT OR REPLACE INTO channels (id, name, url, stream_type, group_title, always_on) VALUES (?, ?, ?, ?, ?, ?)`);
-    defaultChannels.forEach(c => stmt.run(c));
-    stmt.finalize();
-
-    console.log(`[DB] default channels ready: ${defaultChannels.length} total`);
-
-    db.run(`DELETE FROM channels WHERE id LIKE 'besp%'
-            OR id IN ('4k')
-            OR (id LIKE 'alwan%' AND id NOT LIKE 'alwan_hd%' AND id NOT LIKE 'alwan_4k%')
-            OR id IN ('bein1_4k', 'bein2_4k', 'bein3_4k', 'bein4_4k', 'bein5_4k', 'bein6_4k', 'bein7_4k', 'bein8_4k', 'bein9_4k')`);
-
-    db.all(`SELECT * FROM channels`, [], (err, rows) => {
-        if (!err && rows) {
-            rows.forEach(ch => {
-                channelTypes[ch.id] = ch.stream_type;
-                channelAlwaysOn[ch.id] = !!ch.always_on;
-                if (ch.always_on) {
-                    startChannelProcess(ch.id, ch.url, ch.stream_type, true);
-                }
-            });
-        }
-    });
-});
 
 app.use('/hls', express.static(__dirname));
 
