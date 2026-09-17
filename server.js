@@ -28,6 +28,36 @@ const nms = new NodeMediaServer(nmsConfig);
 nms.run();
 
 app.use(cors());
+
+// محلل multipart/form-data مدمج (بلا حزم إضافية) — بعض تطبيقات Xtream ترسل الـ credentials بهذه الصيغة
+function parseMultipart(buffer, boundary) {
+    const result = {};
+    const sep = Buffer.from(`--${boundary}`);
+    let start = buffer.indexOf(sep) + sep.length + 2;
+    while (true) {
+        const end = buffer.indexOf(sep, start);
+        if (end === -1) break;
+        const part = buffer.slice(start, end - 2);
+        const hEnd = part.indexOf('\r\n\r\n');
+        if (hEnd !== -1) {
+            const nameMatch = part.slice(0, hEnd).toString().match(/name="([^"]+)"/);
+            if (nameMatch) result[nameMatch[1]] = part.slice(hEnd + 4).toString().trim();
+        }
+        start = end + sep.length + 2;
+    }
+    return result;
+}
+
+app.use((req, res, next) => {
+    const ct = req.headers['content-type'] || '';
+    if (!ct.includes('multipart/form-data')) return next();
+    const boundary = ct.match(/boundary="?([^"\s;]+)"?/);
+    if (!boundary) return next();
+    const chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end', () => { req.body = parseMultipart(Buffer.concat(chunks), boundary[1]); next(); });
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
