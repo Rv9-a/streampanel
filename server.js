@@ -182,6 +182,21 @@ defaultChannels.push(sepCh('alwan_4k', '4K', groupAlwan));
     defaultChannels.push(mk(`alwan_4k${i + 1}`, `ALWAN SPORT ${i + 1} 4K`, `${ssBase}${u}.ts`, groupAlwan));
 });
 
+// ── Rotana l روتانا (محمي — ريفير rotana.net حصرياً) ──
+const groupRot = 'Rotana l روتانا';
+const rotBase = 'https://rotana.hibridcdn.net/rotananet/';
+const rotChannels = [
+    ['rotana_cinema', 'Rotana Cinema', `cinema_net-7Y83PP5adWixDF93/playlist.m3u8`],
+    ['rotana_masr', 'Rotana Cinema Masr', `cinemamasr_net-7Y83PP5adWixDF93/playlist.m3u8`],
+    ['rotana_comedy', 'Rotana Comedy', `comedy_net-7Y83PP5adWixDF93/playlist.m3u8`],
+    ['rotana_classical', 'Rotana Classical', `classical_net-7Y83PP5adWixDF93/playlist.m3u8`],
+    ['rotana_drama', 'Rotana Drama', `drama_net-7Y83PP5adWixDF93/playlist.m3u8`],
+    ['rotana_khaleejiya', 'Rotana Khaleejiya', `khaleejiya_net-7Y83PP5adWixDF93/playlist.m3u8`],
+    ['rotana_lbc', 'Rotana LBC', `lbc_net-7Y83PP5adWixDF93/playlist.m3u8`],
+    ['rotana_risala', 'Rotana Risala', `risala_net-7Y83PP5adWixDF93/playlist.m3u8`]
+];
+rotChannels.forEach(c => defaultChannels.push(mk(c[0], c[1], `${rotBase}${c[2]}`, groupRot, 0, 0)));
+
 app.use('/hls', express.static(__dirname));
 
 const HEADERS = {
@@ -190,6 +205,17 @@ const HEADERS = {
     'Origin': 'https://www.maziikaaaaaa.shop'
 };
 
+const ROTANA_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+    'Referer': 'https://rotana.net/',
+    'Origin': 'https://rotana.net/'
+};
+
+function getHeadersForUrl(url) {
+    if (url && url.includes('rotana.hibridcdn.net')) return ROTANA_HEADERS;
+    return HEADERS;
+}
+
 app.get('/proxy-seg', async (req, res) => {
     let targetUrl = req.query.url;
     if (!targetUrl) return res.status(400).send('Missing URL');
@@ -197,7 +223,7 @@ app.get('/proxy-seg', async (req, res) => {
     try {
         const response = await axios.get(targetUrl, {
             responseType: 'arraybuffer',
-            headers: HEADERS,
+            headers: getHeadersForUrl(targetUrl),
             timeout: 10000
         });
 
