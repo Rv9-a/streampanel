@@ -38,6 +38,8 @@ const db = new sqlite3.Database(path.join(__dirname, 'panel.db'), (err) => {
 const channelTypes = {};
 const adminSessions = {};
 const ffmpegProcesses = {};
+const channelRetries = {};
+const MAX_CHANNEL_RETRIES = 5;
 
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS users (
@@ -81,7 +83,7 @@ db.serialize(() => {
     defaultChannels.forEach(c => stmt.run(c));
     stmt.finalize();
 
-    db.run(`DELETE FROM channels WHERE id LIKE 'alwan%'`);
+    db.run(`DELETE FROM channels WHERE id LIKE 'alwan%' OR id LIKE 'besp%' OR id IN ('4k')`);
 
     db.all(`SELECT * FROM channels`, [], (err, rows) => {
         if (!err && rows) {
@@ -180,7 +182,6 @@ function startChannelProcess(id, url, streamType = 0) {
         );
     }
 
-    // زيادة البفر وإعدادات التقطيع لاستقرار أكثر وتفادي السرعة الزائدة
     const hlsTime = isRtmp ? '4' : '2';
     const hlsListSize = isRtmp ? '10' : '6';
 
@@ -197,17 +198,59 @@ function startChannelProcess(id, url, streamType = 0) {
         outputPath
     );
 
-    const proc = spawn('ffmpeg', ffmpegArgs);
+    let proc;
+    try {
+        proc = spawn('ffmpeg', ffmpegArgs);
+    } catch (err) {
+        console.error(`[spawn error - ${id}]: ${err.message}`);
+        scheduleChannelRetry(id);
+        return;
+    }
+
     ffmpegProcesses[id] = proc;
 
-    proc.on('close', () => {
-        delete ffmpegProcesses[id];
-        setTimeout(() => {
-            db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
-                if (ch) startChannelProcess(ch.id, ch.url, ch.stream_type);
-            });
-        }, 3000);
+    proc.stderr.on('data', (data) => {
+        const msg = data.toString().trim();
+        if (msg) console.log(`[FFmpeg ${id}]: ${msg}`);
     });
+
+    proc.on('error', (err) => {
+        console.error(`[FFmpeg error - ${id}]: ${err.message}`);
+        delete ffmpegProcesses[id];
+        scheduleChannelRetry(id);
+    });
+
+    proc.on('close', (code) => {
+        delete ffmpegProcesses[id];
+        if (code !== 0) {
+            console.error(`[FFmpeg exit - ${id}]: code ${code}`);
+            scheduleChannelRetry(id);
+        } else {
+            console.log(`[FFmpeg exit - ${id}]: normal exit`);
+        }
+    });
+}
+
+function scheduleChannelRetry(id) {
+    if (ffmpegProcesses[id]) return;
+    const attempt = channelRetries[id] || 0;
+    if (attempt >= MAX_CHANNEL_RETRIES) {
+        console.error(`[FFmpeg stop - ${id}]: max retries reached, disabling`);
+        delete channelRetries[id];
+        return;
+    }
+    channelRetries[id] = attempt + 1;
+    const delays = [3000, 15000, 30000, 60000, 120000];
+    const delay = delays[Math.min(attempt, delays.length - 1)];
+    console.log(`[FFmpeg retry - ${id}]: attempt ${attempt + 1}/${MAX_CHANNEL_RETRIES} in ${delay / 1000}s`);
+    setTimeout(() => {
+        db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
+            if (ch && !ffmpegProcesses[id]) {
+                channelRetries[id] = 0;
+                startChannelProcess(ch.id, ch.url, ch.stream_type);
+            }
+        });
+    }, delay);
 }
 
 app.get('/live/:username/:password/:channelId.m3u8', (req, res) => {
@@ -525,4 +568,19 @@ app.get('/admin', (req, res) => {
     res.send(adminHtml);
 });
 
+process.on('uncaughtException', (err) => {
+    console.error('UNCAUGHT EXCEPTION (panel continues):', err.message);
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('UNHANDLED REJECTION (panel continues):', reason);
+});
+
 app.listen(PORT, () => console.log(`IPTV Panel running on port ${PORT}`));
+app.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} already in use — restarting manually required`);
+    } else {
+        console.error('Panel server error:', err.message);
+    }
+});
