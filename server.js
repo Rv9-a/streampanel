@@ -458,13 +458,15 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
 
     let hlsTime = isRtmp ? '4' : '2';
     let hlsListSize = isRtmp ? '10' : '6';
-    let rwTimeout = '10000000';
+    let rwTimeout = '30000000'; // 30 ثانية للجميع
 
     if (isBeinRv) {
-        // deep buffering: bigger segments + longer window + long read timeout + auto-reconnect
         hlsTime = '4';
         hlsListSize = '10';
-        rwTimeout = '60000000';
+        rwTimeout = '60000000'; // 60 ثانية لـ bein rv
+    }
+
+    if (!isRtmp) {
         ffmpegArgs.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '10');
     }
 
@@ -646,23 +648,10 @@ const serveChannelPlaylist = (req, res) => {
                 startChannelProcess(channelId, channel.url, channel.stream_type, alwaysOn, channel.group_title);
             }
 
-            const playlistPath = path.join(__dirname, channelId, 'index.m3u8');
-            const startedAt = Date.now();
-
-            const pollPlaylist = () => {
-                if (fs.existsSync(playlistPath)) {
-                    channelLastAccess[channelId] = Date.now();
-                    return res.redirect(`/live/${username}/${password}/${channelId}/index.m3u8`);
-                }
-                if (!ffmpegProcesses[channelId]) {
-                    return res.status(503).send('Stream offline (source unavailable)');
-                }
-                if (Date.now() - startedAt > 15000) {
-                    return res.status(503).send('Stream is still building, try again...');
-                }
-                setTimeout(pollPlaylist, 1000);
-            };
-            pollPlaylist();
+            channelLastAccess[channelId] = Date.now();
+            // رد فوري بلا انتظار: التطبيق يعتبر الاتصال نجح فوراً،
+            // والـ placeholder playlist تغطّي مدة بناء البث حتى يجيء الـ index.m3u8 الحقيقي
+            return res.redirect(`/live/${username}/${password}/${channelId}/index.m3u8`);
         });
     });
 };
@@ -691,13 +680,27 @@ app.get(/^\/live\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/, (req, res) => {
         if (!fullPath.startsWith(channelDir + path.sep)) {
             return res.status(403).send('Forbidden');
         }
-        if (!fs.existsSync(fullPath)) return res.status(404).send('Not Found');
 
         const ext = path.extname(file).toLowerCase();
+        const isIndex = file === 'index.m3u8';
+
+        // placeholder: إذا index.m3u8 غير موجود لكن القناة معروفة → نعيد playlist فارغ
+        // بدلاً من 404 — بالتالي ينتظر الـ app (HLS retry) وتظهر القنوات فور جاهزيتها
+        if (isIndex && !fs.existsSync(fullPath) && channelTypes[channelId] !== undefined) {
+            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            return res.send('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:0\n');
+        }
+
+        if (!fs.existsSync(fullPath)) return res.status(404).send('Not Found');
+
         if (ext === '.m3u8') {
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         } else {
             res.setHeader('Content-Type', 'video/mp2t');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         }
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.sendFile(fullPath);
