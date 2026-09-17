@@ -101,7 +101,7 @@ db.serialize(() => {
                     channelTypes[ch.id] = ch.stream_type;
                     channelAlwaysOn[ch.id] = !!ch.always_on;
                     if (ch.always_on) {
-                        startChannelProcess(ch.id, ch.url, ch.stream_type, true);
+                        startChannelProcess(ch.id, ch.url, ch.stream_type, true, ch.group_title);
                     }
                 });
             }
@@ -301,7 +301,7 @@ app.get('/debug/rotana', async (req, res) => {
     res.json(result);
 });
 
-function startChannelProcess(id, url, streamType = 0, alwaysOn = false) {
+function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = '') {
     if (ffmpegProcesses[id]) return;
 
     channelAlwaysOn[id] = alwaysOn;
@@ -314,6 +314,7 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false) {
 
     const isRtmp = url.startsWith('rtmp://');
     const isDirect = parseInt(streamType) === 1;
+    const isBeinRv = group === groupRV && !isRtmp; // buffered mode: bein rv only, NOT rvtv_event
 
     let inputSource = url;
     if (!isRtmp && !isDirect) {
@@ -333,11 +334,20 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false) {
         );
     }
 
-    const hlsTime = isRtmp ? '4' : '2';
-    const hlsListSize = isRtmp ? '10' : '6';
+    let hlsTime = isRtmp ? '4' : '2';
+    let hlsListSize = isRtmp ? '10' : '6';
+    let rwTimeout = '10000000';
+
+    if (isBeinRv) {
+        // deep buffering: bigger segments + longer window + long read timeout + auto-reconnect
+        hlsTime = '4';
+        hlsListSize = '10';
+        rwTimeout = '60000000';
+        ffmpegArgs.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '10');
+    }
 
     ffmpegArgs.push(
-        '-rw_timeout', '10000000',
+        '-rw_timeout', rwTimeout,
         '-analyzeduration', '10000000',
         '-probesize', '10000000',
         '-i', inputSource,
@@ -401,7 +411,7 @@ function scheduleChannelRetry(id, isRtmp = false) {
         console.log(`[FFmpeg retry - ${id}]: RTMP waiting for source, retry in ${delay / 1000}s`);
         setTimeout(() => {
             db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
-                if (ch && !ffmpegProcesses[id]) startChannelProcess(ch.id, ch.url, ch.stream_type, !!channelAlwaysOn[id]);
+                if (ch && !ffmpegProcesses[id]) startChannelProcess(ch.id, ch.url, ch.stream_type, !!channelAlwaysOn[id], ch.group_title);
             });
         }, delay);
         return;
@@ -421,7 +431,7 @@ function scheduleChannelRetry(id, isRtmp = false) {
         db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
             if (ch && !ffmpegProcesses[id]) {
                 channelRetries[id] = 0;
-                startChannelProcess(ch.id, ch.url, ch.stream_type, !!channelAlwaysOn[ch.id]);
+                startChannelProcess(ch.id, ch.url, ch.stream_type, !!channelAlwaysOn[ch.id], ch.group_title);
             }
         });
     }, delay);
@@ -498,7 +508,7 @@ app.get('/live/:username/:password/:channelId.m3u8', (req, res) => {
 
             if (!ffmpegProcesses[channelId]) {
                 if (!alwaysOn) cleanChannelDir(channelId);
-                startChannelProcess(channelId, channel.url, channel.stream_type, alwaysOn);
+                startChannelProcess(channelId, channel.url, channel.stream_type, alwaysOn, channel.group_title);
             }
 
             const playlistPath = path.join(__dirname, channelId, 'index.m3u8');
@@ -574,7 +584,7 @@ app.post('/api/channels/add', checkAdmin, (req, res) => {
         () => {
             channelTypes[id] = sType;
             channelAlwaysOn[id] = !!alwaysOn;
-            if (alwaysOn) startChannelProcess(id, url, sType, true);
+            if (alwaysOn) startChannelProcess(id, url, sType, true, group_title || 'سيرفر 1');
             res.json({ success: true });
         });
 });
