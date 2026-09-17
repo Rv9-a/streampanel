@@ -220,16 +220,19 @@ app.get('/proxy-seg', async (req, res) => {
     let targetUrl = req.query.url;
     if (!targetUrl) return res.status(400).send('Missing URL');
 
+    const isRotana = targetUrl.includes('rotana.hibridcdn.net');
+
     try {
         const response = await axios.get(targetUrl, {
             responseType: 'arraybuffer',
             headers: getHeadersForUrl(targetUrl),
-            timeout: 10000
+            timeout: 15000
         });
 
         let buffer = Buffer.from(response.data);
 
         if (targetUrl.includes('.m3u8') || targetUrl.includes('.json')) {
+            if (isRotana) console.log(`[Proxy-Rotana] m3u8 OK ${buffer.length}b from ${targetUrl.slice(-60)}`);
             res.setHeader('Content-Type', 'application/x-mpegURL');
             let text = buffer.toString('utf8');
             const baseUri = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
@@ -265,8 +268,37 @@ app.get('/proxy-seg', async (req, res) => {
         res.send(cleanBuffer);
 
     } catch (err) {
+        if (isRotana) console.log(`[Proxy-Rotana] ERROR ${err.code || err.message} on ${targetUrl.slice(-80)}`);
         res.status(500).send("Proxy Error");
     }
+});
+
+app.get('/debug/rotana', async (req, res) => {
+    const masterUrl = 'https://rotana.hibridcdn.net/rotananet/cinema_net-7Y83PP5adWixDF93/playlist.m3u8';
+    const result = { master: null, variant: null, chunk: null, error: null };
+    try {
+        const m = await axios.get(masterUrl, { responseType: 'arraybuffer', headers: ROTANA_HEADERS, timeout: 10000 });
+        const mText = Buffer.from(m.data).toString('utf8');
+        result.master = { status: m.status, size: m.data.byteLength, firstLine: mText.split('\n').find(l => l.includes('chunks')) || 'none' };
+
+        const variantUrl = mText.split('\n').find(l => l.includes('chunks.m3u8') && !l.startsWith('#'));
+        if (!variantUrl) throw new Error('no variant found in master');
+        const vFull = new URL(variantUrl, masterUrl.substring(0, masterUrl.lastIndexOf('/') + 1)).href;
+        const v = await axios.get(vFull, { responseType: 'arraybuffer', headers: ROTANA_HEADERS, timeout: 10000 });
+        const vText = Buffer.from(v.data).toString('utf8');
+        result.variant = { status: v.status, size: v.data.byteLength, segmentCount: vText.split('\n').filter(l => l.includes('.ts')).length };
+
+        const chunkUrl = vText.split('\n').find(l => l.includes('.ts') && !l.startsWith('#'));
+        if (!chunkUrl) throw new Error('no chunk found in variant');
+        const cFull = new URL(chunkUrl, vFull.substring(0, vFull.lastIndexOf('/') + 1)).href;
+        const c = await axios.get(cFull, { responseType: 'arraybuffer', headers: ROTANA_HEADERS, timeout: 15000 });
+        result.chunk = { status: c.status, size: c.data.byteLength, startsWith0x47: c.data[0] === 0x47 };
+
+        result.ok = true;
+    } catch (err) {
+        result.error = err.code || err.message;
+    }
+    res.json(result);
 });
 
 function startChannelProcess(id, url, streamType = 0, alwaysOn = false) {
