@@ -747,8 +747,9 @@ function xtreamCreds(req) {
 
 app.all(['/player_api.php', '/panel_api.php'], (req, res) => {
     const creds = xtreamCreds(req);
-    const action = req.query.action;
-    console.log(`[Xtream] ${req.method} ${req.originalUrl} ct=${req.headers['content-type'] || 'none'} q=${JSON.stringify(req.query)} body=${JSON.stringify(req.body || {}).slice(0,200)} auth=${req.headers.authorization ? 'yes' : 'no'} => u=${creds ? creds.username : 'none'} action=${action || 'login'}`);
+    const bodyAction = (req.body || {}).action;
+    const action = req.query.action || bodyAction;
+    console.log(`[Xtream] ${req.method} ${req.originalUrl} action=${action || 'login'} u=${creds ? creds.username : 'none'}`);
     if (!creds) {
         return res.json({ user_info: null });
     }
@@ -837,12 +838,13 @@ app.all(['/player_api.php', '/panel_api.php'], (req, res) => {
 // endpoint قديم لكلاسيك Xtream — يعيد قائمة M3U (بعض التطبيقات تعتمد عليه حصراً)
 app.all('/get.php', (req, res) => {
     const creds = xtreamCreds(req);
+    const b = req.body || {};
     if (!creds) { console.log('[get.php] no creds'); return res.status(403).send('Access denied'); }
     authUser(creds.username, creds.password, (user) => {
         if (!user) { console.log('[get.php] auth fail', creds.username); return res.status(403).send('Access denied'); }
-        console.log('[get.php] OK', creds.username, 'output=', req.query.output);
-        const type = req.query.type || 'm3u_plus';
-        const ext = String(req.query.output) === 'ts' ? 'ts' : 'm3u8';
+        console.log('[get.php] OK', creds.username, 'output=', req.query.output || b.output);
+        const type = req.query.type || b.type || 'm3u_plus';
+        const ext = String(req.query.output || b.output) === 'ts' ? 'ts' : 'm3u8';
         if (['m3u_plus', 'live', 'live_plus'].includes(String(type))) {
             db.all(`SELECT * FROM channels ORDER BY rowid`, [], (err, channels) => {
                 let out = `#EXTM3U\n`;
