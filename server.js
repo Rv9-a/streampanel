@@ -718,7 +718,7 @@ function xtreamCreds(req) {
 app.all(['/player_api.php', '/panel_api.php'], (req, res) => {
     const creds = xtreamCreds(req);
     const action = req.query.action;
-    console.log(`[Xtream] ${req.method} ${req.originalUrl} u=${creds ? creds.username : 'none'} action=${action || 'login'}`);
+    console.log(`[Xtream] ${req.method} ${req.originalUrl} ct=${req.headers['content-type'] || 'none'} q=${JSON.stringify(req.query)} body=${JSON.stringify(req.body || {}).slice(0,200)} auth=${req.headers.authorization ? 'yes' : 'no'} => u=${creds ? creds.username : 'none'} action=${action || 'login'}`);
     if (!creds) {
         return res.json({ user_info: null });
     }
