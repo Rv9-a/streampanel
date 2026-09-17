@@ -109,53 +109,78 @@ db.serialize(() => {
     });
 });
 
-    const groupRV = 'BEIN RV';
-    const groupSS = 'bein sport ss';
-    const groupSrc = 'bein sport مصدر خاص';
-    const groupAlK = 'ALKASS الكأس';
-    const groupAlwan = 'ALWAN SPORT';
+    const SEP_URL = 'dummy://separator';
+const groupRV = 'bein rv';
+const groupSS = 'bein ss';
+const groupSrc = 'bein مصدر خاص';
+const groupAlK = 'الكاس alkass';
+const groupAlwan = 'alwan sport';
 
-    const defaultChannels = [];
-    const mk = (id, name, url, group, always = 0, streamType = 1) => [id, name, url, streamType, group, always];
+const defaultChannels = [];
+const mk = (id, name, url, group, always = 0, streamType = 1) => [id, name, url, streamType, group, always];
+const sepCh = (id, label, group) => mk(`sep_${id}`, `════ ${label} ════`, SEP_URL, group);
 
-    for (let i = 1; i <= 7; i++) {
-        defaultChannels.push(mk(`bein${i}`, `beIN Sports ${i} FHD`, `https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN${i}FHD.m3u8`, groupRV, 1, 0));
-    }
-    defaultChannels.push(mk('rvtv_event', 'Rvtv (live event)', 'rtmp://127.0.0.1:1935/live/event', groupRV, 1, 0));
+// ── bein rv (تعمل دائماً + بروكسي) ──
+for (let i = 1; i <= 7; i++) {
+    defaultChannels.push(mk(`bein${i}`, `beIN Sports ${i} FHD`, `https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN${i}FHD.m3u8`, groupRV, 1, 0));
+}
+defaultChannels.push(mk('rvtv_event', 'Rvtv (live event)', 'rtmp://127.0.0.1:1935/live/event', groupRV, 1, 0));
 
-    const ssBase = 'http://pro.netmos.ovh:7355/live/EXMOQNS9Y30998CX0/LKHSB87278DOKCPP/';
-    defaultChannels.push(mk('bein_ss_4k_true', 'bein 4K (true 4k)', `${ssBase}158960.ts`, `${groupSS}/4K`));
-    defaultChannels.push(mk('bein_ss_4k_event', 'bein 4K (only event)', `${ssBase}158961.ts`, `${groupSS}/4K`));
-    defaultChannels.push(mk('bein_ss_news', 'bein news', `${ssBase}83618.ts`, `${groupSS}/متنوعة`));
-    defaultChannels.push(mk('bein_ss_global', 'bein global', `${ssBase}231675.ts`, `${groupSS}/متنوعة`));
+// ── bein ss ──
+const ssBase = 'http://pro.netmos.ovh:7355/live/EXMOQNS9Y30998CX0/LKHSB87278DOKCPP/';
+const ss4k = ['221764', '221765', '221766', '221767', 'https://prime-fast.sytes.net/prime-tv/stream/78.m3u8', '221769', '221770', '221771'];
+defaultChannels.push(sepCh('ss_4k', '4K', groupSS));
+defaultChannels.push(mk('bein_ss_4k_true', 'bein 4K (true 4k)', `${ssBase}158960.ts`, groupSS));
+defaultChannels.push(mk('bein_ss_4k_event', 'bein 4K (only event)', `${ssBase}158961.ts`, groupSS));
+defaultChannels.push(sepCh('ss_4k_fhd', '4K (FHD)', groupSS));
+ss4k.forEach((u, i) => {
+    const url = u.startsWith('http') ? u : `${ssBase}${u}.ts`;
+    defaultChannels.push(mk(`bein_ss_4k${i + 1}`, `beinsport 4K ${i + 1} FHD`, url, groupSS));
+});
+defaultChannels.push(sepCh('ss_misc', 'متنوعة', groupSS));
+defaultChannels.push(mk('bein_ss_news', 'bein news', `${ssBase}83618.ts`, groupSS));
+defaultChannels.push(mk('bein_ss_global', 'bein global', `${ssBase}231675.ts`, groupSS));
+defaultChannels.push(sepCh('ss_sd', 'SD', groupSS));
+['102890', '102891', '108484', '108485', '158897', '102895', '108486', '158898', '158899'].forEach((u, i) => {
+    defaultChannels.push(mk(`bein_ss_sd${i + 1}`, `beinsport ${i + 1} SD`, `${ssBase}${u}.ts`, groupSS));
+});
+defaultChannels.push(sepCh('ss_hd', 'HD', groupSS));
+['158866', '158889', '158890', '158891', '158892', '158893', '158894', '158895', '158896'].forEach((u, i) => {
+    defaultChannels.push(mk(`bein_ss_hd${i + 1}`, `beinsport ${i + 1} HD`, `${ssBase}${u}.ts`, groupSS));
+});
+defaultChannels.push(sepCh('ss_fhd', 'FHD', groupSS));
+['158867', '158900', '158901', '158902', '158903', '158904', '158905', '158906', '158907'].forEach((u, i) => {
+    defaultChannels.push(mk(`bein_ss_fhd${i + 1}`, `beinsport ${i + 1} FHD`, `${ssBase}${u}.ts`, groupSS));
+});
 
-    const ssSd = ['102890', '102891', '108484', '108485', '158897', '102895', '108486', '158898', '158899'];
-    ssSd.forEach((u, i) => defaultChannels.push(mk(`bein_ss_sd${i + 1}`, `beinsport ${i + 1} SD`, `${ssBase}${u}.ts`, `${groupSS}/SD`)));
-    const ssHd = ['158866', '158889', '158890', '158891', '158892', '158893', '158894', '158895', '158896'];
-    ssHd.forEach((u, i) => defaultChannels.push(mk(`bein_ss_hd${i + 1}`, `beinsport ${i + 1} HD`, `${ssBase}${u}.ts`, `${groupSS}/HD`)));
-    const ssFhd = ['158867', '158900', '158901', '158902', '158903', '158904', '158905', '158906', '158907'];
-    ssFhd.forEach((u, i) => defaultChannels.push(mk(`bein_ss_fhd${i + 1}`, `beinsport ${i + 1} FHD`, `${ssBase}${u}.ts`, `${groupSS}/FHD`)));
-    const ss4k = ['221764', '221765', '221766', '221767', 'https://prime-fast.sytes.net/prime-tv/stream/78.m3u8', '221769', '221770', '221771'];
-    ss4k.forEach((u, i) => {
-        const url = u.startsWith('http') ? u : `${ssBase}${u}.ts`;
-        defaultChannels.push(mk(`bein_ss_4k${i + 1}`, `beinsport 4K ${i + 1} FHD`, url, `${groupSS}/4K`));
-    });
+// ── bein مصدر خاص ──
+const pfBase = 'https://prime-fast.sytes.net/prime-tv/stream/';
+defaultChannels.push(sepCh('src_4k', '4K', groupSrc));
+for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_src4k${i}`, `bein ${i} 4K`, `${pfBase}${73 + i}.m3u8`, groupSrc));
+defaultChannels.push(sepCh('src_uhd', 'UHD', groupSrc));
+for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcuhd${i}`, `bein sports ${i} (UHD)`, `http://fackyou-cdn5.cfd/BEIN-${i}/index.m3u8`, groupSrc));
+defaultChannels.push(sepCh('src_fhd', 'FHD', groupSrc));
+for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcfhd${i}`, `bein sports ${i} FHD`, `${pfBase}${62 + i}.m3u8`, groupSrc));
+defaultChannels.push(sepCh('src_hd', 'HD', groupSrc));
+for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srchd${i}`, `bein sports ${i} HD`, `${pfBase}${51 + i}.m3u8`, groupSrc));
+defaultChannels.push(sepCh('src_sd', 'SD', groupSrc));
+for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcsd${i}`, `bein sports ${i} SD`, `${pfBase}${24 + i}.m3u8`, groupSrc));
+defaultChannels.push(sepCh('src_mob', 'وقت المباريات', groupSrc));
+for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcmob${i}`, `bein sports ${i}`, `http://82.39.115.26:3000/live/${i}.m3u8`, groupSrc));
 
-    const pfBase = 'https://prime-fast.sytes.net/prime-tv/stream/';
-    for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_src4k${i}`, `bein ${i} 4K`, `${pfBase}${73 + i}.m3u8`, `${groupSrc}/4K`));
-    for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcuhd${i}`, `bein sports ${i} (UHD)`, `http://fackyou-cdn5.cfd/BEIN-${i}/index.m3u8`, `${groupSrc}/UHD`));
-    for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcfhd${i}`, `bein sports ${i} FHD`, `${pfBase}${62 + i}.m3u8`, `${groupSrc}/FHD`));
-    for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srchd${i}`, `bein sports ${i} HD`, `${pfBase}${51 + i}.m3u8`, `${groupSrc}/HD`));
-    for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcsd${i}`, `bein sports ${i} SD`, `${pfBase}${24 + i}.m3u8`, `${groupSrc}/SD`));
-    for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcmob${i}`, `bein sports ${i}`, `http://82.39.115.26:3000/live/${i}.m3u8`, `${groupSrc}/وقت المباريات`));
+// ── الكاس alkass ──
+const kWords = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+for (let i = 0; i < 8; i++) defaultChannels.push(mk(`alkass${i + 1}`, `الكأس ${i + 1}`, `https://alkass.kianezidi.workers.dev/${kWords[i]}.m3u8`, groupAlK));
 
-    const kWords = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
-    for (let i = 0; i < 8; i++) defaultChannels.push(mk(`alkass${i + 1}`, `الكأس ${i + 1}`, `https://alkass.kianezidi.workers.dev/${kWords[i]}.m3u8`, groupAlK));
-
-    const alwanHd = ['232595', '232596', '232597', '232598', '232599', '232600'];
-    alwanHd.forEach((u, i) => defaultChannels.push(mk(`alwan_hd${i + 1}`, `ALWAN SPORT ${i + 1} HD`, `${ssBase}${u}.ts`, `${groupAlwan}/HD`)));
-    const alwan4k = ['232601', '232602', '232603', '232604', '232605', '232606'];
-    alwan4k.forEach((u, i) => defaultChannels.push(mk(`alwan_4k${i + 1}`, `ALWAN SPORT ${i + 1} 4K`, `${ssBase}${u}.ts`, `${groupAlwan}/4K`)));
+// ── alwan sport ──
+defaultChannels.push(sepCh('alwan_hd', 'HD', groupAlwan));
+['232595', '232596', '232597', '232598', '232599', '232600'].forEach((u, i) => {
+    defaultChannels.push(mk(`alwan_hd${i + 1}`, `ALWAN SPORT ${i + 1} HD`, `${ssBase}${u}.ts`, groupAlwan));
+});
+defaultChannels.push(sepCh('alwan_4k', '4K', groupAlwan));
+['232601', '232602', '232603', '232604', '232605', '232606'].forEach((u, i) => {
+    defaultChannels.push(mk(`alwan_4k${i + 1}`, `ALWAN SPORT ${i + 1} 4K`, `${ssBase}${u}.ts`, groupAlwan));
+});
 
 app.use('/hls', express.static(__dirname));
 
@@ -355,6 +380,27 @@ function cleanChannelDir(id) {
     }
 }
 
+const DUMMY_DIR = path.join(__dirname, 'dummy_sep');
+function ensureDummyAsset() {
+    const out = path.join(DUMMY_DIR, 'index.m3u8');
+    if (fs.existsSync(out)) return;
+    if (!fs.existsSync(DUMMY_DIR)) fs.mkdirSync(DUMMY_DIR, { recursive: true });
+    const args = ['-y', '-loglevel', 'error',
+        '-f', 'lavfi', '-i', 'color=c=black:s=640x360:r=10',
+        '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+        '-t', '60',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-ac', '2', '-ar', '44100',
+        '-f', 'hls', '-hls_time', '2', '-hls_list_size', '30',
+        '-hls_flags', 'delete_segments+append_list',
+        out];
+    console.log('[Dummy] generating separator video asset (one-time)...');
+    const proc = spawn('ffmpeg', args);
+    proc.on('error', (e) => console.error('[Dummy] spawn error:', e.message));
+    proc.on('close', (code) => console.log(`[Dummy] separator asset ready (exit ${code})`));
+    proc.stderr.on('data', () => {});
+}
+
 function checkIdleChannels() {
     const now = Date.now();
     for (const id of Object.keys(ffmpegProcesses)) {
@@ -382,6 +428,11 @@ app.get('/live/:username/:password/:channelId.m3u8', (req, res) => {
             if (!channel) return res.status(404).send('Not Found');
 
             channelLastAccess[channelId] = Date.now();
+
+            if (channel.url && channel.url.startsWith('dummy://')) {
+                return res.redirect('/hls/dummy_sep/index.m3u8');
+            }
+
             const alwaysOn = !!channelAlwaysOn[channelId];
 
             if (!ffmpegProcesses[channelId]) {
@@ -417,7 +468,7 @@ app.get('/playlist/:username/:password/get.m3u', (req, res) => {
     db.get(`SELECT * FROM users WHERE username = ? AND password = ? AND status = 1`, [username, password], (err, user) => {
         if (err || !user) return res.status(403).send('Unauthorized');
 
-        db.all(`SELECT * FROM channels`, [], (err, channels) => {
+        db.all(`SELECT * FROM channels ORDER BY rowid`, [], (err, channels) => {
             let m3uContent = `#EXTM3U\n`;
             channels.forEach(ch => {
                 const groupName = ch.group_title || 'سيرفر 1';
@@ -535,7 +586,7 @@ const adminHtml = `<!DOCTYPE html>
                     <form id="channel-form" class="row g-2">
                         <div class="col-md-6"><input type="text" id="ch_id" class="form-control" placeholder="معرّف (rvtv_event)" required></div>
                         <div class="col-md-6"><input type="text" id="ch_name" class="form-control" placeholder="اسم القناة" required></div>
-                        <div class="col-12"><input type="text" id="ch_group" class="form-control" placeholder="المجموعة (استخدم / للتصنيف)" value="BEIN RV" required></div>
+                        <div class="col-12"><input type="text" id="ch_group" class="form-control" placeholder="المجموعة" value="bein rv" required></div>
                         <div class="col-12"><input type="url" id="ch_url" class="form-control" placeholder="رابط Stream الأصلي أو RTMP" required></div>
                         <div class="col-12">
                             <select id="ch_stream_type" class="form-select">
@@ -726,7 +777,10 @@ process.on('unhandledRejection', (reason) => {
     console.error('UNHANDLED REJECTION (panel continues):', reason);
 });
 
-app.listen(PORT, () => console.log(`IPTV Panel running on port ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`IPTV Panel running on port ${PORT}`);
+    ensureDummyAsset();
+});
 app.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
         console.error(`Port ${PORT} already in use — restarting manually required`);
