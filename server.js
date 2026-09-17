@@ -232,12 +232,15 @@ app.get('/proxy-seg', async (req, res) => {
         if (targetUrl.includes('.m3u8') || targetUrl.includes('.json')) {
             res.setHeader('Content-Type', 'application/x-mpegURL');
             let text = buffer.toString('utf8');
+            const baseUri = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
             let modified = text.split('\n').map(line => {
                 let trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith('#')) return line;
                 if (trimmed.startsWith('http')) {
                     return `http://127.0.0.1:${PORT}/proxy-seg?url=${encodeURIComponent(trimmed)}`;
                 }
-                return line;
+                const resolved = new URL(trimmed, baseUri).href;
+                return `http://127.0.0.1:${PORT}/proxy-seg?url=${encodeURIComponent(resolved)}`;
             }).join('\n');
             return res.send(modified);
         }
