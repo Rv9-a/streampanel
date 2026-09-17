@@ -1,5 +1,16 @@
 bein1/
+bein1_4k/
+bein2_4k/
+bein3_4k/
+bein4_4k/
+bein5_4k/
+bein6_4k/
+bein7_4k/
+bein8_4k/
+bein9_4k/
 *.ts
 *.m3u8
 node_modules/
 .env
+*.db
+data/

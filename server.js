@@ -66,30 +66,28 @@ db.serialize(() => {
         ['bein6', 'beIN Sports 6 FHD', 'https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN6FHD.m3u8', 0, 'سيرفر 1'],
         ['bein7', 'beIN Sports 7 FHD', 'https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN7FHD.m3u8', 0, 'سيرفر 1'],
         ['rvtv_event', 'Rvtv (live event)', 'rtmp://127.0.0.1:1935/live/event', 0, 'سيرفر 1'],
-        ['alwan1_4k', 'Alwan Sport 1 4K', 'http://185.191.126.127/live/cks43bj7qfsoa/y2w7etojwtdle/418111', 1, 'سيرفر 2'],
-        ['alwan1_hd', 'Alwan Sport 1 HD', 'http://185.191.126.127/live/cks43bj7qfsoa/y2w7etojwtdle/418112', 1, 'سيرفر 2'],
-        ['alwan2_4k', 'Alwan Sport 2 4K', 'http://185.191.126.127/live/cks43bj7qfsoa/y2w7etojwtdle/418114', 1, 'سيرفر 2'],
-        ['alwan2_hd', 'Alwan Sport 2 HD', 'http://185.191.126.127/live/cks43bj7qfsoa/y2w7etojwtdle/418115', 1, 'سيرفر 2'],
-        ['alwan3_4k', 'Alwan Sport 3 4K', 'http://185.191.126.127/live/cks43bj7qfsoa/y2w7etojwtdle/418117', 1, 'سيرفر 2'],
-        ['alwan3_hd', 'Alwan Sport 3 HD', 'http://185.191.126.127/live/cks43bj7qfsoa/y2w7etojwtdle/418118', 1, 'سيرفر 2'],
-        ['alwan4_4k', 'Alwan Sport 4 4K', 'http://185.191.126.127/live/cks43bj7qfsoa/y2w7etojwtdle/418120', 1, 'سيرفر 2'],
-        ['alwan4_hd', 'Alwan Sport 4 HD', 'http://185.191.126.127/live/cks43bj7qfsoa/y2w7etojwtdle/418121', 1, 'سيرفر 2'],
-        ['alwan5_4k', 'Alwan Sport 5 4K', 'http://185.191.126.127/live/cks43bj7qfsoa/y2w7etojwtdle/418123', 1, 'سيرفر 2'],
-        ['alwan5_hd', 'Alwan Sport 5 HD', 'http://185.191.126.127/live/cks43bj7qfsoa/y2w7etojwtdle/418124', 1, 'سيرفر 2'],
-        ['alwan6_4k', 'Alwan Sport 6 4K', 'http://185.191.126.127/live/cks43bj7qfsoa/y2w7etojwtdle/418126', 1, 'سيرفر 2']
+        ['bein1_4k', 'beIN Sports 1 4K', 'https://prime-fast.sytes.net/prime-tv/stream/74.m3u8', 1, 'سيرفر 2'],
+        ['bein2_4k', 'beIN Sports 2 4K', 'https://prime-fast.sytes.net/prime-tv/stream/75.m3u8', 1, 'سيرفر 2'],
+        ['bein3_4k', 'beIN Sports 3 4K', 'https://prime-fast.sytes.net/prime-tv/stream/76.m3u8', 1, 'سيرفر 2'],
+        ['bein4_4k', 'beIN Sports 4 4K', 'https://prime-fast.sytes.net/prime-tv/stream/77.m3u8', 1, 'سيرفر 2'],
+        ['bein5_4k', 'beIN Sports 5 4K', 'https://prime-fast.sytes.net/prime-tv/stream/78.m3u8', 1, 'سيرفر 2'],
+        ['bein6_4k', 'beIN Sports 6 4K', 'https://prime-fast.sytes.net/prime-tv/stream/79.m3u8', 1, 'سيرفر 2'],
+        ['bein7_4k', 'beIN Sports 7 4K', 'https://prime-fast.sytes.net/prime-tv/stream/80.m3u8', 1, 'سيرفر 2'],
+        ['bein8_4k', 'beIN Sports 8 4K', 'https://prime-fast.sytes.net/prime-tv/stream/81.m3u8', 1, 'سيرفر 2'],
+        ['bein9_4k', 'beIN Sports 9 4K', 'https://prime-fast.sytes.net/prime-tv/stream/82.m3u8', 1, 'سيرفر 2']
     ];
 
     const stmt = db.prepare(`INSERT OR REPLACE INTO channels (id, name, url, stream_type, group_title) VALUES (?, ?, ?, ?, ?)`);
     defaultChannels.forEach(c => stmt.run(c));
     stmt.finalize();
 
+    db.run(`DELETE FROM channels WHERE id LIKE 'alwan%'`);
+
     db.all(`SELECT * FROM channels`, [], (err, rows) => {
         if (!err && rows) {
             rows.forEach(ch => {
                 channelTypes[ch.id] = ch.stream_type;
-                if (ch.stream_type === 0) {
-                    startChannelProcess(ch.id, ch.url, ch.stream_type);
-                }
+                startChannelProcess(ch.id, ch.url, ch.stream_type);
             });
         }
     });
@@ -174,6 +172,8 @@ function startChannelProcess(id, url, streamType = 0) {
     let ffmpegArgs = ['-y', '-loglevel', 'error'];
 
     if (isDirect && !isRtmp) {
+        ffmpegArgs.push('-user_agent', HEADERS['User-Agent']);
+    } else if (!isRtmp) {
         ffmpegArgs.push(
             '-user_agent', HEADERS['User-Agent'],
             '-headers', `Referer: ${HEADERS['Referer']}\r\nOrigin: ${HEADERS['Origin']}\r\n`
@@ -202,13 +202,11 @@ function startChannelProcess(id, url, streamType = 0) {
 
     proc.on('close', () => {
         delete ffmpegProcesses[id];
-        if (channelTypes[id] === 0) {
-            setTimeout(() => {
-                db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
-                    if (ch) startChannelProcess(ch.id, ch.url, ch.stream_type);
-                });
-            }, 3000);
-        }
+        setTimeout(() => {
+            db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
+                if (ch) startChannelProcess(ch.id, ch.url, ch.stream_type);
+            });
+        }, 3000);
     });
 }
 
@@ -282,9 +280,7 @@ app.post('/api/channels/add', checkAdmin, (req, res) => {
         [id, name, url, sType, group_title || 'سيرفر 1'], 
         () => {
             channelTypes[id] = sType;
-            if (sType === 0) {
-                startChannelProcess(id, url, sType);
-            }
+            startChannelProcess(id, url, sType);
             res.json({ success: true });
         });
 });
@@ -358,8 +354,8 @@ const adminHtml = `<!DOCTYPE html>
                         <div class="col-12"><input type="url" id="ch_url" class="form-control" placeholder="رابط Stream الأصلي أو RTMP" required></div>
                         <div class="col-12">
                             <select id="ch_stream_type" class="form-select">
-                                <option value="0" selected>🔄 يعمل دائماً بالخلفية</option>
-                                <option value="1">📡 عند الطلب On-Demand</option>
+                                <option value="0" selected>🔒 مصدر محمي (يحتاج بروكسي)</option>
+                                <option value="1">📡 رابط مباشر (بدون بروكسي)</option>
                             </select>
                         </div>
                         <button type="submit" class="btn btn-primary w-100 mt-2">إضافة القناة</button>
