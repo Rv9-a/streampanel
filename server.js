@@ -706,6 +706,11 @@ app.all(['/player_api.php', '/panel_api.php'], (req, res) => {
             });
         }
 
+        const activeNow = (() => {
+            pruneDeviceSessions(user.username);
+            return deviceSessions[user.username] ? deviceSessions[user.username].size : 0;
+        })();
+
         const userInfo = {
             username: user.username,
             password: user.password,
@@ -714,7 +719,7 @@ app.all(['/player_api.php', '/panel_api.php'], (req, res) => {
             status: 'Active',
             exp_date: Math.floor(new Date(user.expire_date).getTime() / 1000),
             is_trial: '0',
-            active_cons: user.max_connections || 1,
+            active_cons: activeNow,
             created_at: '0',
             max_connections: String(user.max_connections || 1),
             allowed_output_formats: ['m3u8', 'ts']
@@ -725,6 +730,7 @@ app.all(['/player_api.php', '/panel_api.php'], (req, res) => {
         if (!action) {
             const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
             registerDeviceSession(user.username, user.max_connections, getClientKey(req), ip);
+            userInfo.active_cons = deviceSessions[user.username] ? deviceSessions[user.username].size : 0;
             return res.json(baseResp);
         }
 
@@ -879,6 +885,13 @@ app.post('/api/users/delete', checkAdmin, (req, res) => {
     db.get(`SELECT username FROM users WHERE id = ?`, [req.body.id], (err, u) => {
         if (u && deviceSessions[u.username]) delete deviceSessions[u.username];
         db.run(`DELETE FROM users WHERE id = ?`, [req.body.id], () => res.json({ success: true }));
+    });
+});
+
+app.post('/api/users/kick', checkAdmin, (req, res) => {
+    db.get(`SELECT username FROM users WHERE id = ?`, [req.body.id], (err, u) => {
+        if (u && deviceSessions[u.username]) delete deviceSessions[u.username];
+        res.json({ success: true });
     });
 });
 
@@ -1060,7 +1073,10 @@ const adminHtml = `<!DOCTYPE html>
                 <div class="p-2 mb-2 bg-dark rounded small">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <span>👤 <b>\${u.username}</b> | 🔑 \${u.password} | 📅 \${u.expire_date} | 📡 <b>\${u.connected || 0}</b>/<b>\${u.max_connections || 1}</b> أجهزة</span>
-                        <button class="btn btn-sm btn-danger py-0" onclick="deleteUser(\${u.id})">حذف</button>
+                        <span>
+                            <button class="btn btn-sm btn-warning py-0" onclick="kickUser(\${u.id})">💢 طرد</button>
+                            <button class="btn btn-sm btn-danger py-0" onclick="deleteUser(\${u.id})">حذف</button>
+                        </span>
                     </div>
                     <div class="input-group input-group-sm">
                         <input type="text" class="form-control" value="\${m3uUrl}" readonly>
@@ -1096,6 +1112,18 @@ const adminHtml = `<!DOCTYPE html>
             });
             loadUsers();
         }
+
+        async function kickUser(id) {
+            if(!confirm('طرد جميع أجهزة هذا المشترك الآن؟')) return;
+            await fetchWithAuth('/api/users/kick', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id})
+            });
+            loadUsers();
+        }
+
+        setInterval(loadUsers, 6000);
     </script>
 </body>
 </html>`;
