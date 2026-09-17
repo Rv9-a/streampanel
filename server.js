@@ -217,23 +217,36 @@ function startChannelProcess(id, url, streamType = 0) {
     proc.on('error', (err) => {
         console.error(`[FFmpeg error - ${id}]: ${err.message}`);
         delete ffmpegProcesses[id];
-        scheduleChannelRetry(id);
+        scheduleChannelRetry(id, isRtmp);
     });
 
     proc.on('close', (code) => {
         delete ffmpegProcesses[id];
         if (code !== 0) {
             console.error(`[FFmpeg exit - ${id}]: code ${code}`);
-            scheduleChannelRetry(id);
+            scheduleChannelRetry(id, isRtmp);
         } else {
             console.log(`[FFmpeg exit - ${id}]: normal exit`);
         }
     });
 }
 
-function scheduleChannelRetry(id) {
+function scheduleChannelRetry(id, isRtmp = false) {
     if (ffmpegProcesses[id]) return;
     const attempt = channelRetries[id] || 0;
+
+    if (isRtmp) {
+        channelRetries[id] = attempt + 1;
+        const delay = 10000;
+        console.log(`[FFmpeg retry - ${id}]: RTMP waiting for source, retry in ${delay / 1000}s`);
+        setTimeout(() => {
+            db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
+                if (ch && !ffmpegProcesses[id]) startChannelProcess(ch.id, ch.url, ch.stream_type);
+            });
+        }, delay);
+        return;
+    }
+
     if (attempt >= MAX_CHANNEL_RETRIES) {
         console.error(`[FFmpeg stop - ${id}]: max retries reached, disabling`);
         delete channelRetries[id];
