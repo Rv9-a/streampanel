@@ -673,11 +673,30 @@ app.get('/playlist/:username/:password/get.m3u', (req, res) => {
 });
 
 // ─── Xtream Codes API (لبرامج مثل 1stream / IPTV Smarters / OTT Navigator) ───
-app.get('/player_api.php', (req, res) => {
-    const { username, password, action } = req.query;
-    if (!username || !password) {
+function xtreamCreds(req) {
+    const q = req.query || {};
+    const b = req.body || {};
+    if (q.username && q.password) return { username: q.username, password: q.password };
+    if (b.username && b.password) return { username: b.username, password: b.password };
+    const auth = req.headers.authorization || '';
+    const m = /Basic\s+([A-Za-z0-9+/=]+)/i.exec(auth);
+    if (m) {
+        try {
+            const dec = Buffer.from(m[1], 'base64').toString('utf8');
+            const i = dec.indexOf(':');
+            if (i > 0) return { username: dec.slice(0, i), password: dec.slice(i + 1) };
+        } catch (e) {}
+    }
+    return null;
+}
+
+app.get(['/player_api.php', '/panel_api.php'], (req, res) => {
+    const creds = xtreamCreds(req);
+    const action = req.query.action;
+    if (!creds) {
         return res.json({ user_info: null });
     }
+    const { username, password } = creds;
 
     authUser(username, password, (user) => {
         if (!user) {
@@ -749,6 +768,43 @@ app.get('/player_api.php', (req, res) => {
         }
 
         return res.json([]);
+    });
+});
+
+// endpoint قديم لكلاسيك Xtream — يعيد قائمة M3U (بعض التطبيقات تعتمد عليه حصراً)
+app.get('/get.php', (req, res) => {
+    const creds = xtreamCreds(req);
+    if (!creds) return res.status(403).send('Access denied');
+    authUser(creds.username, creds.password, (user) => {
+        if (!user) return res.status(403).send('Access denied');
+        const type = req.query.type || 'm3u_plus';
+        if (['m3u_plus', 'live', 'live_plus'].includes(String(type))) {
+            db.all(`SELECT * FROM channels ORDER BY rowid`, [], (err, channels) => {
+                let out = `#EXTM3U\n`;
+                (channels || []).forEach((ch) => {
+                    const g = (ch.group_title || 'سيرفر 1').replace(/,/g, '،');
+                    const n = String(ch.name).replace(/,/g, '،');
+                    out += `#EXTINF:-1 tvg-id="${ch.id}" tvg-name="${n}" group-title="${g}",${n}\n`;
+                    out += `http://${req.headers.host}/live/${encodeURIComponent(user.username)}/${encodeURIComponent(user.password)}/${ch.id}.m3u8\n`;
+                });
+                res.setHeader('Content-Type', 'audio/x-mpegurl; charset=utf-8');
+                res.send(out);
+            });
+        } else {
+            res.setHeader('Content-Type', 'audio/x-mpegurl; charset=utf-8');
+            res.send(`#EXTM3U\n`);
+        }
+    });
+});
+
+// EPG — لا يوجد حالياً، نعيد XMLTV فارغاً كي لا يتعطل التطبيق
+app.get('/xmltv.php', (req, res) => {
+    const creds = xtreamCreds(req);
+    if (!creds) return res.status(403).send('Access denied');
+    authUser(creds.username, creds.password, (user) => {
+        if (!user) return res.status(403).send('Access denied');
+        res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+        res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<tv generator-info-name="stream-panel"></tv>`);
     });
 });
 
