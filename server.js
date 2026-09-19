@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const path = require('path');
 const os = require('os');
 const sqlite3 = require('sqlite3').verbose();
@@ -1271,6 +1271,33 @@ app.post('/api/reset/server', checkAdmin, (req, res) => {
     });
     child.unref();
     setTimeout(() => process.exit(0), 1500);
+});
+
+// سحب التحديثات من GitHub من اللوحة مباشرة — ينفّذ git pull ثم يعيد تشغيل السيرفر
+// (حتى تُطبّق التغييرات الجديدة) خلال ثوانٍ.
+let gitPulling = false;
+app.post('/api/git/pull', checkAdmin, (req, res) => {
+    if (gitPulling) return res.status(409).json({ error: 'سحب جارٍ بالفعل — انتظر قليلاً' });
+    gitPulling = true;
+    console.log('[/api/git/pull]: operator requested git pull');
+    exec('git pull', { cwd: __dirname, timeout: 120000, windowsHide: true }, (err, stdout, stderr) => {
+        gitPulling = false;
+        const out = ((stdout || '') + '\n' + (stderr || '')).trim();
+        if (err) {
+            console.error('[/api/git/pull] FAILED:\n' + out);
+            return res.status(500).json({ error: 'فشل السحب — تحقق من الشبكة/تعارض الملفات', output: out });
+        }
+        console.log('[/api/git/pull] ok, restarting server to apply:\n' + out);
+        res.json({ success: true, output: out, restarting: true });
+        setTimeout(() => {
+            console.log('[/api/git/pull]: restarting panel server...');
+            const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+                detached: true, stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true
+            });
+            child.unref();
+            setTimeout(() => process.exit(0), 1500);
+        }, 1200);
+    });
 });
 
 app.get('/api/users', checkAdmin, (req, res) => {

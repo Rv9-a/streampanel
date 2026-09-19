@@ -403,6 +403,7 @@ body{
           <button class="btn btn-warn btn-sm" onclick="groupStop()">⏹ إيقاف المجموعة الحالية</button>
           <button class="btn btn-warn btn-sm" onclick="resetStreams()">🔄 ترسيت خدمة البث</button>
           <button class="btn btn-danger btn-sm" onclick="resetServer()">🔁 ترسيت السيرفر كامل</button>
+          <button class="btn btn-primary btn-sm" onclick="gitPull()">⬇️ سحب التحديثات (Git Pull)</button>
         </div>
       </div>
 
@@ -745,6 +746,19 @@ async function resetServer(){
   await api('/api/reset/server', { method:'POST' });
   toast('جارِ ترسيت السيرفر...');
   setTimeout(()=>location.reload(), 4000);
+}
+async function gitPull(){
+  if (!await confirmDialog('سحب آخر التحديثات من GitHub الآن؟ سيُعاد تشغيل السيرفر تلقائياً بعد السحب')) return;
+  toast('جارِ سحب التحديثات... قد يستغرق ثوانٍ');
+  const res = await api('/api/git/pull', { method:'POST' });
+  const data = await res.json().catch(()=>({}));
+  const out = data.output || '';
+  if (!data.success){
+    toast('❌ ' + (data.error || 'فشل السحب') + (out ? ' — ' + out.slice(0, 180) : ''));
+    return;
+  }
+  toast('✅ تم السحب — جارِ إعادة تشغيل السيرفر...');
+  setTimeout(()=>location.reload(), 4500);
 }
 
 async function deleteChannel(id){
