@@ -521,10 +521,9 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
         );
     }
 
-    // بثّ حي سريع: مقطع جديد كل ~2 ثانية + رصيد ~30 ثانية — المشغّل يمتلك دائماً ما يعرضه
-    // فلا يجف الجسر أبداً، ويرده حد الكبش أو يوقف القائمة. الكتابة ذرّية عبر temp_file.
-    let hlsTime = '2';
-    let hlsListSize = '15';
+    // التوقيت القديم: مقطع كل 5 ثوانٍ × نافذة 6 (≈30 ثانية) — لا يجهد الرامات/المعالج
+    let hlsTime = '5';
+    let hlsListSize = '6';
     let rwTimeout = '30000000'; // 30 ثانية للجميع
 
     if (isBeinRv) {
@@ -547,9 +546,9 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
         // بدون delete_segments: الشرائح الخارجة من النافذة تبقى على القرص حتى ينظّفها
         // cleanStaleCache — فطلب مقطع قديم من مشغّل متأخر لا يعود 404 (سبب التقطيع)
         '-hls_flags', 'omit_endlist+temp_file+independent_segments',
-        // عند تعافيك المصدر بعد نكسة تأتي حزم بكثرة دفعة واحدة — طابور صغير (افتراضياً 128)
-        // يفيض ويُسقط ffmpeg (سبب تقطيع حقيقي). نرفعه مع منع تداخل الطوابع الزمنية.
-        '-max_muxing_queue_size', '4096',
+        // عند تعافي المصدر بعد نكسة تأتي الحزم بهدوء مع مقاطع أكبر — طابور 1024 يكفي ضد الانهيار
+        // دون استنزاف ذاكرة (كان 4096 مبالغاً فيه لفترات التأخر الطويلة، والانتظار صفر يمنع التكدس)
+        '-max_muxing_queue_size', '1024',
         '-max_interleave_delta', '0',
         outputPath
     );
@@ -908,7 +907,7 @@ const serveChannelPlaylist = (req, res) => {
                 res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
                 res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
                 res.setHeader('Access-Control-Allow-Origin', '*');
-                return res.send('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n');
+                return res.send('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXT-X-MEDIA-SEQUENCE:0\n');
             }
 
             if (channel.url && channel.url.startsWith('dummy://')) {
@@ -966,7 +965,7 @@ app.get(/^\/live\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/, (req, res) => {
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Access-Control-Allow-Origin', '*');
-            return res.send('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n');
+            return res.send('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXT-X-MEDIA-SEQUENCE:0\n');
         }
 
         if (!fs.existsSync(fullPath)) return res.status(404).send('Not Found');
