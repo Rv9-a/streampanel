@@ -11,6 +11,10 @@ const NodeMediaServer = require('node-media-server');
 const app = express();
 const PORT = 3000;
 
+// مجلد بث القنوات — خارج المشروع (بعيداً عن مزامنة OneDrive وتبطئ القراءة/الكتابة)
+// ويمكن التحكم به عبر متغير البيئة STREAM_CACHE_DIR.
+const CACHE_ROOT = process.env.STREAM_CACHE_DIR || path.join(os.tmpdir(), 'ipstream-cache');
+
 // --- تشغيل خادم RTMP لاستقبال البث من OBS ---
 const nmsConfig = {
   rtmp: {
@@ -488,7 +492,7 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
     channelAlwaysOn[id] = alwaysOn;
     if (!alwaysOn) console.log(`[On-Demand start - ${id}]: starting ffmpeg`);
 
-    const channelDir = path.join(__dirname, id);
+    const channelDir = path.join(CACHE_ROOT, id);
     if (!fs.existsSync(channelDir)) {
         fs.mkdirSync(channelDir, { recursive: true });
     }
@@ -517,11 +521,9 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
         );
     }
 
-    // نافذة جاهزة ~30 ثانية (5 ث × 6) — كافي ليعرض المشغّل دون تقطيع.
-    // بدون append_list: القائمة تُعاد كتابتها نظيفة وتتقدم الأرقام بشكل صحيح،
-    // و temp_file يعطي كتابة ذرّية فلا يقرأ المشغّل قائمة مقطوعة أثناء التحديث.
-    let hlsTime = '5';
-    let hlsListSize = '6';
+    // نافذة جاهزة ~48 ثانية (6 ث × 8) ليتحمّل المشغّل أي نكسة قصيرة من المصدر.
+    let hlsTime = '6';
+    let hlsListSize = '8';
     let rwTimeout = '30000000'; // 30 ثانية للجميع
 
     if (isBeinRv) {
@@ -541,7 +543,9 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
         '-f', 'hls', 
         '-hls_time', hlsTime, 
         '-hls_list_size', hlsListSize, 
-        '-hls_flags', 'delete_segments+omit_endlist+temp_file',
+        // بدون delete_segments: الشرائح الخارجة من النافذة تبقى على القرص حتى ينظّفها
+        // cleanStaleCache — فطلب مقطع قديم من مشغّل متأخر لا يعود 404 (سبب التقطيع)
+        '-hls_flags', 'omit_endlist+temp_file',
         outputPath
     );
 
@@ -631,7 +635,7 @@ function scheduleChannelRetry(id, isRtmp = false) {
 }
 
 function cleanChannelDir(id) {
-    const dir = path.join(__dirname, id);
+    const dir = path.join(CACHE_ROOT, id);
     if (!fs.existsSync(dir)) return;
     try {
         fs.readdirSync(dir).forEach(f => {
@@ -720,7 +724,7 @@ function cleanStaleCache() {
     const STALE_MS = 90 * 1000;
     const log = [];
     for (const id of Object.keys(channelTypes)) {
-        const dir = path.join(__dirname, id);
+        const dir = path.join(CACHE_ROOT, id);
         if (!fs.existsSync(dir)) continue;
         const running = !!ffmpegProcesses[id];
         let removedCount = 0;
@@ -899,7 +903,7 @@ const serveChannelPlaylist = (req, res) => {
                 res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
                 res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
                 res.setHeader('Access-Control-Allow-Origin', '*');
-                return res.send('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXT-X-MEDIA-SEQUENCE:0\n');
+                return res.send('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:0\n');
             }
 
             if (channel.url && channel.url.startsWith('dummy://')) {
@@ -940,7 +944,9 @@ app.get(/^\/live\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/, (req, res) => {
         const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
         touchDeviceSession(username, deviceKey, ip);
 
-        const channelDir = path.join(__dirname, channelId);
+        // ملفات flow bucket تبقى في المشروع (DUMMY_DIR)، وملفات البث الحي في CACHE_ROOT
+        const dummyStream = channelId === 'dummy_sep';
+        const channelDir = dummyStream ? DUMMY_DIR : path.join(CACHE_ROOT, channelId);
         const fullPath = path.normalize(path.join(channelDir, file));
         if (!fullPath.startsWith(channelDir + path.sep)) {
             return res.status(403).send('Forbidden');
@@ -955,7 +961,7 @@ app.get(/^\/live\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/, (req, res) => {
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Access-Control-Allow-Origin', '*');
-            return res.send('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXT-X-MEDIA-SEQUENCE:0\n');
+            return res.send('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:0\n');
         }
 
         if (!fs.existsSync(fullPath)) return res.status(404).send('Not Found');
