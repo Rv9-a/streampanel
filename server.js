@@ -445,6 +445,8 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
     if (!fs.existsSync(channelDir)) {
         fs.mkdirSync(channelDir, { recursive: true });
     }
+    // نبدأ بملفات نظيفة دائماً — يمنع اشتغال قوائم قديمة مع شرائح جديدة بعد إعادة تشغيل ffmpeg
+    cleanChannelDir(id);
 
     const isRtmp = url.startsWith('rtmp://');
     const isDirect = parseInt(streamType) === 1;
@@ -468,9 +470,11 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
         );
     }
 
-    // تأخير موحّد 20 ثانية لكل القنوات: شرائح 5 ثواني × 4 داخل القائمة = نافذة 20 ثانية
+    // نافذة جاهزة ~30 ثانية (5 ث × 6) — كافي ليعرض المشغّل دون تقطيع.
+    // بدون append_list: القائمة تُعاد كتابتها نظيفة وتتقدم الأرقام بشكل صحيح،
+    // و temp_file يعطي كتابة ذرّية فلا يقرأ المشغّل قائمة مقطوعة أثناء التحديث.
     let hlsTime = '5';
-    let hlsListSize = '4';
+    let hlsListSize = '6';
     let rwTimeout = '30000000'; // 30 ثانية للجميع
 
     if (isBeinRv) {
@@ -490,7 +494,7 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
         '-f', 'hls', 
         '-hls_time', hlsTime, 
         '-hls_list_size', hlsListSize, 
-        '-hls_flags', 'delete_segments+append_list+omit_endlist',
+        '-hls_flags', 'delete_segments+omit_endlist+temp_file',
         outputPath
     );
 
