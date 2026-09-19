@@ -467,14 +467,13 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
         );
     }
 
-    let hlsTime = isRtmp ? '4' : '2';
-    let hlsListSize = isRtmp ? '10' : '6';
+    // تأخير موحّد 20 ثانية لكل القنوات: شرائح 5 ثواني × 4 داخل القائمة = نافذة 20 ثانية
+    let hlsTime = '5';
+    let hlsListSize = '4';
     let rwTimeout = '30000000'; // 30 ثانية للجميع
 
     if (isBeinRv) {
-        hlsTime = '4';
-        hlsListSize = '10';
-        rwTimeout = '60000000'; // 60 ثانية لـ bein rv
+        rwTimeout = '60000000'; // مصادر bein rv متقلّبة — مهلة قراءة أطول (60 ثانية)
     }
 
     if (!isRtmp) {
@@ -630,6 +629,40 @@ setInterval(() => {
     }
 }, 15000);
 
+// حذف دوري للكاش القديم: بعد إعادة تشغيل ffmpeg تبقى مقاطع .ts قديمة وتسجل قديم
+// (index.m3u8) يشير إليها — ما يسبب تضارباً و 404 لدى المشغّل. أي ملف أقدم من 90
+// ثانية داخل مجلد قناة هو حتماً نسخة مهجورة (نافذة البث الـ 20 ثانية حية فقط)،
+// فيُحذف تلقائياً كل 5 دقائق.
+function cleanStaleCache() {
+    const now = Date.now();
+    const STALE_MS = 90 * 1000;
+    const log = [];
+    for (const id of Object.keys(channelTypes)) {
+        const dir = path.join(__dirname, id);
+        if (!fs.existsSync(dir)) continue;
+        const running = !!ffmpegProcesses[id];
+        let removedCount = 0;
+        try {
+            for (const f of fs.readdirSync(dir)) {
+                const full = path.join(dir, f);
+                if (!f.endsWith('.ts') && f !== 'index.m3u8') continue;
+                let st;
+                try { st = fs.statSync(full); } catch (e) { continue; }
+                if (!st.isFile()) continue;
+                const age = now - st.mtimeMs;
+                if (f.endsWith('.ts') && age > STALE_MS) {
+                    try { fs.unlinkSync(full); removedCount++; } catch (e) {}
+                } else if (f === 'index.m3u8' && !running && age > 1000) {
+                    try { fs.unlinkSync(full); removedCount++; } catch (e) {}
+                }
+            }
+        } catch (e) { continue; }
+        if (removedCount) log.push(`${id}(${removedCount})`);
+    }
+    if (log.length) console.log(`[CacheClean] ${log.join(' ')}`);
+}
+setInterval(cleanStaleCache, 5 * 60 * 1000);
+
 const serveChannelPlaylist = (req, res) => {
     const username = req.params.username;
     const password = req.params.password;
@@ -701,7 +734,7 @@ app.get(/^\/live\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/, (req, res) => {
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Access-Control-Allow-Origin', '*');
-            return res.send('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:0\n');
+            return res.send('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXT-X-MEDIA-SEQUENCE:0\n');
         }
 
         if (!fs.existsSync(fullPath)) return res.status(404).send('Not Found');
