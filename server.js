@@ -80,7 +80,24 @@ const DEVICE_SESSION_TIMEOUT = 60000; // 60s بدون أي طلب مقطع = ا�
 const channelRetries = {};
 const channelAlwaysOn = {};
 const channelLastAccess = {};
-const manuallyStopped = new Set(); // قنوات أوقفها المشغل يدوياً — لا تُعاد تلقائياً
+
+// ═══ سقف صارم على عدد عمليات ffmpeg المتزامنة ═══
+// السبب الجذري للانهيار المتكرر (رأينا 647 إعادة تشغيل): عند إقلاع السيرفر تُطلق
+// كل القنوات (~130) دفعة واحدة في اللحظة نفسها → ذروة CPU/RAM تفجّر السيرفر الصغير
+// → pm2 يعيد التشغيل → الدفعة كلها ثانية → دورة موت لا تنتهي، وهذا هو التقطيع نفسه.
+// الحل ثلاثي:
+//  1) سقف حاسم على عدد العمليات (من الذاكرة المتاحة لسيرفر صغير، أو STREAM_MAX_FFMPEG).
+//  2) إقلاع متدرج يُطلق دفعات صغيرة بفاصل بدل انفجار القنوات الـ130.
+//  3) فوق السقف: تُخرج تلقائياً القناة الأقل مشاهدة (LRU) وتُعاد فور الطلب لها.
+const MAX_FFMPEG = (() => {
+    const env = parseInt(process.env.STREAM_MAX_FFMPEG || '', 10);
+    if (env > 0) return env;
+    const freeMiB = Math.max(1024, Math.floor((os.totalmem() - 512 * 1024 * 1024) / (1024 * 1024)));
+    return Math.max(16, Math.floor(freeMiB / 92)); // تقدير محافظ: ~92MB لكل عملية ffmpeg
+})();
+const quotaEvicted = new Set(); // قنوات خرجت قسراً بسبب السقف — لا تُعاد تلقائياً بل عند الطلب
+let bootQueue = [];             // طابور الإقلاع المتدرج
+let bootQueueRunning = false;   // علم: جارٍ تفريغ طابور الإقلاع
 const IDLE_TIMEOUT_MS = 86400000; // 24 hours – channels stay “always on”
 const IDLE_CHECK_MS = 60000;       // check once per minute
 
