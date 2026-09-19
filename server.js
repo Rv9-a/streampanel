@@ -76,8 +76,8 @@ const channelRetries = {};
 const channelAlwaysOn = {};
 const channelLastAccess = {};
 const MAX_CHANNEL_RETRIES = 5;
-const IDLE_TIMEOUT_MS = 120000;
-const IDLE_CHECK_MS = 30000;
+const IDLE_TIMEOUT_MS = 86400000; // 24 hours – channels stay “always on”
+const IDLE_CHECK_MS = 60000;       // check once per minute
 
 function getClientKey(req) {
     const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
@@ -216,19 +216,23 @@ db.serialize(() => {
                     OR id IN ('bein1_4k', 'bein2_4k', 'bein3_4k', 'bein4_4k', 'bein5_4k', 'bein6_4k', 'bein7_4k', 'bein8_4k', 'bein9_4k')`, (cleanErr) => {
                 if (cleanErr) console.error('[DB] cleanup error:', cleanErr.message);
 
-                db.all(`SELECT * FROM channels`, [], (err, rows) => {
-                    if (err) { console.error('[DB] boot load error:', err.message); return; }
-                    const alwaysChannels = (rows || []).filter(r => r.always_on);
-                    if (alwaysChannels.length) console.log(`[DB] starting ${alwaysChannels.length} always-on channels at boot`);
-                    (rows || []).forEach(ch => {
-                        channelTypes[ch.id] = ch.stream_type;
-                        channelAlwaysOn[ch.id] = !!ch.always_on;
-                        if (ch.always_on) {
-                            startChannelProcess(ch.id, ch.url, ch.stream_type, true, ch.group_title);
-                        }
+                db.run(`UPDATE channels SET always_on = 1`, (upErr) => {
+                    if (upErr) console.error('[DB] force always-on error:', upErr.message);
+
+                    db.all(`SELECT * FROM channels`, [], (err, rows) => {
+                        if (err) { console.error('[DB] boot load error:', err.message); return; }
+                        const launchable = (rows || []).filter(r => !r.url.startsWith('dummy://'));
+                        console.log(`[DB] starting ${launchable.length} channels always-on at boot`);
+                        (rows || []).forEach(ch => {
+                            channelTypes[ch.id] = ch.stream_type;
+                            channelAlwaysOn[ch.id] = true;
+                            if (!ch.url.startsWith('dummy://')) {
+                                startChannelProcess(ch.id, ch.url, ch.stream_type, true, ch.group_title);
+                            }
+                        });
+                        rebuildXtreamMaps();
+                        console.log(`[DB] boot init complete: ${(rows || []).length} channels, ${Object.keys(channelTypes).length} typed`);
                     });
-                    rebuildXtreamMaps();
-                    console.log(`[DB] boot init complete: ${(rows || []).length} channels, ${Object.keys(channelTypes).length} typed`);
                 });
             });
         });
@@ -725,10 +729,12 @@ app.get('/playlist/:username/:password/get.m3u', (req, res) => {
 
         db.all(`SELECT * FROM channels ORDER BY rowid`, [], (err, channels) => {
             let m3uContent = `#EXTM3U\n`;
-            channels.forEach(ch => {
+channels.forEach(ch => {
                 const groupName = ch.group_title || 'سيرفر 1';
                 m3uContent += `#EXTINF:-1 tvg-id="${ch.id}" tvg-name="${ch.name}" group-title="${groupName}",${ch.name}\n`;
                 m3uContent += `http://${host}/live/${username}/${password}/${ch.id}.m3u8\n`;
+                // Mark channel as "always on" – exempt from idle timeout
+                channelAlwaysOn[ch.id] = true;
             });
 
             res.setHeader('Content-Type', 'audio/x-mpegurl');
@@ -909,14 +915,14 @@ app.get('/api/channels', checkAdmin, (req, res) => {
 app.post('/api/channels/add', checkAdmin, (req, res) => {
     const { id, name, url, stream_type, group_title } = req.body;
     const sType = parseInt(stream_type) || 0;
-    const alwaysOn = req.body.always_on ? 1 : 0;
+    const alwaysOn = 1;
     
     db.run(`INSERT OR REPLACE INTO channels (id, name, url, stream_type, group_title, always_on) VALUES (?, ?, ?, ?, ?, ?)`, 
         [id, name, url, sType, group_title || 'سيرفر 1', alwaysOn], 
         () => {
             channelTypes[id] = sType;
-            channelAlwaysOn[id] = !!alwaysOn;
-            if (alwaysOn) startChannelProcess(id, url, sType, true, group_title || 'سيرفر 1');
+            channelAlwaysOn[id] = true;
+            if (!url.startsWith('dummy://')) startChannelProcess(id, url, sType, true, group_title || 'سيرفر 1');
             rebuildXtreamMaps(() => res.json({ success: true }));
         });
 });
