@@ -212,6 +212,20 @@ body{
 .empty{text-align:center;color:var(--muted);padding:34px 10px;font-size:13.5px}
 .empty .big{font-size:38px;margin-bottom:8px}
 
+/* server monitor */
+.det-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.det{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 15px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid var(--border);font-size:13px}
+.det b{color:var(--muted);font-weight:600}
+.det span{font-weight:700;font-variant-numeric:tabular-nums}
+.mon-title{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.mon-chip{padding:6px 13px;border-radius:20px;font-size:12.5px;font-weight:700;border:1px solid var(--border)}
+.mon-chip.ok{background:rgba(52,211,153,.12);color:var(--ok);border-color:rgba(52,211,153,.35)}
+.mon-chip.warn{background:rgba(251,191,36,.12);color:var(--warn);border-color:rgba(251,191,36,.35)}
+.mon-chip.bad{background:rgba(248,113,113,.14);color:var(--danger);border-color:rgba(248,113,113,.4)}
+.mon-legend{display:flex;gap:18px;margin-top:10px;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
+.mon-legend b{width:18px;height:3px;border-radius:3px;display:inline-block;margin-left:7px;vertical-align:middle}
+#sv-chart{width:100%;height:auto}
+
 /* forms */
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .form-grid .full{grid-column:1/-1}
@@ -280,6 +294,7 @@ body{
       <div class="nav-item active" data-page="dashboard"><span class="ico">📊</span>لوحة التحكم</div>
       <div class="nav-item" data-page="channels"><span class="ico">📺</span>القنوات</div>
       <div class="nav-item" data-page="users"><span class="ico">👥</span>المشتركين</div>
+      <div class="nav-item" data-page="server"><span class="ico">🖥️</span>سلامة السيرفر</div>
     </nav>
     <div class="sidebar-foot">
       <div class="sidebar-user"><span class="dot"></span>متصل بالسيرفر</div>
@@ -429,6 +444,57 @@ body{
         </div>
       </div>
     </section>
+
+    <!-- ===== SERVER HEALTH ===== -->
+    <section class="page hidden" id="page-server">
+      <div class="stat-grid">
+        <div class="stat-card">
+          <span class="s-ic">⚙️</span>
+          <div class="s-val s-acc" id="sv-cpu">0%</div>
+          <div class="s-lbl">استهلاك المعالج</div>
+          <div class="s-sub" id="sv-cpu-sub">–</div>
+        </div>
+        <div class="stat-card">
+          <span class="s-ic">🧠</span>
+          <div class="s-val s-ok" id="sv-ram">0%</div>
+          <div class="s-lbl">استهلاك الرام</div>
+          <div class="s-sub" id="sv-ram-sub">–</div>
+        </div>
+        <div class="stat-card">
+          <span class="s-ic">⬇️</span>
+          <div class="s-val s-warn" id="sv-dl">0</div>
+          <div class="s-lbl">الإنترنت نازل</div>
+          <div class="s-sub" id="sv-dl-sub">إجمالي –</div>
+        </div>
+        <div class="stat-card">
+          <span class="s-ic">⬆️</span>
+          <div class="s-val s-red" id="sv-ul">0</div>
+          <div class="s-lbl">الإنترنت طالع</div>
+          <div class="s-sub" id="sv-ul-sub">إجمالي –</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-h mon-title">
+          <h3>📈 المعالج والرام (آخر 4 دقائق)</h3>
+          <span class="mon-chip ok" id="sv-status">🟢 طبيعي</span>
+        </div>
+        <div class="section-b">
+          <svg id="sv-chart" viewBox="0 0 600 200" preserveAspectRatio="none"></svg>
+          <div class="mon-legend">
+            <span><b style="background:var(--accent)"></b>المعالج</span>
+            <span><b style="background:var(--ok)"></b>الرام</span>
+            <span><b style="background:var(--warn)"></b>نازل</span>
+            <span><b style="background:var(--danger)"></b>طالع</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-h"><h3>🖥️ تفاصيل السيرفر</h3></div>
+        <div class="section-b"><div class="det-grid" id="sv-details"></div></div>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -518,13 +584,14 @@ function copyText(t){
 function goTo(page){
   state.page = page;
   qs('#nav').querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === page));
-  ['dashboard','channels','users'].forEach(p => {
+  ['dashboard','channels','users','server'].forEach(p => {
     qs('#page-' + p).classList.toggle('hidden', p !== page);
   });
-  qs('#page-title').textContent = {dashboard:'لوحة التحكم', channels:'القنوات', users:'المشتركين'}[page];
+  qs('#page-title').textContent = {dashboard:'لوحة التحكم', channels:'القنوات', users:'المشتركين', server:'سلامة السيرفر'}[page];
   document.getElementById('sidebar').classList.remove('open');
   if (page === 'channels') renderChannels();
   if (page === 'users') renderUsers();
+  if (page === 'server') loadMonitor();
 }
 qs('#nav').querySelectorAll('.nav-item').forEach(n => n.onclick = () => goTo(n.dataset.page));
 
@@ -714,6 +781,83 @@ qs('#ch-search').oninput = e => { state.chSearch = e.target.value; renderChannel
 qs('#usr-search').oninput = e => { state.usrSearch = e.target.value; renderUsers(); };
 qs('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
 
+/* ---------- server monitor ---------- */
+function fmtBytes(n){
+  if (!isFinite(n) || n < 0) n = 0;
+  if (n >= 1073741824) return (n/1073741824).toFixed(2) + ' GB';
+  if (n >= 1048576) return (n/1048576).toFixed(1) + ' MB';
+  if (n >= 1024) return (n/1024).toFixed(1) + ' KB';
+  return Math.round(n) + ' B';
+}
+function fmtSpeed(n){ return fmtBytes(n) + '/s'; }
+function fmtDur(sec){
+  sec = Math.floor(sec || 0);
+  const d = Math.floor(sec/86400), h = Math.floor((sec%86400)/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  let out = '';
+  if (d) out += d + ' يوم ';
+  if (h) out += h + ' ساعة ';
+  if (m) out += m + ' دقيقة ';
+  if (s || !out) out += s + ' ثانية';
+  return out.trim();
+}
+function setAlarm(el, v, warn, danger){
+  el.style.color = (v >= danger) ? 'var(--danger)' : (v >= warn) ? 'var(--warn)' : '';
+}
+function drawMonitorChart(hist){
+  const el = qs('#sv-chart'); if (!el) return;
+  const W = 600, H = 200, PAD = 10;
+  const n = hist.length;
+  if (!n) { el.innerHTML = ''; return; }
+  const build = (key, color) => {
+    const vals = hist.map(h => h[key]);
+    const max = Math.max(100, ...vals);
+    let d = '';
+    vals.forEach((v, i) => {
+      const x = PAD + (n === 1 ? 0 : i / (n - 1)) * (W - 2 * PAD);
+      const y = H - PAD - (v / max) * (H - 2 * PAD);
+      d += (i ? 'L' : 'M') + x.toFixed(1) + ',' + y.toFixed(1);
+    });
+    return '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
+  };
+  let grid = '', labels = '';
+  for (let i = 0; i <= 4; i++) {
+    const y = PAD + (i / 4) * (H - 2 * PAD);
+    grid += '<line x1="' + PAD + '" y1="' + y + '" x2="' + (W - PAD) + '" y2="' + y + '" stroke="rgba(255,255,255,.06)" stroke-width="1"/>';
+    labels += '<text x="2" y="' + (y + 3) + '" fill="#5a6688" font-size="9">' + Math.round(100 - i * 25) + '</text>';
+  }
+  el.innerHTML = grid + labels + build('cpu', '#6366f1') + build('ram', '#34d399') + build('rx', '#fbbf24') + build('tx', '#f87171');
+}
+function detailRow(label, val){ return '<div class="det"><b>' + label + '</b><span>' + val + '</span></div>'; }
+async function loadMonitor(){
+  try{
+    const res = await api('/api/monitor');
+    const m = await res.json();
+    qs('#sv-cpu').textContent = m.cpuPct + '%';
+    setAlarm(qs('#sv-cpu'), m.cpuPct, 55, 85);
+    qs('#sv-cpu-sub').textContent = m.cpuCores + ' أنوية';
+    qs('#sv-ram').textContent = m.ram.pct + '%';
+    setAlarm(qs('#sv-ram'), m.ram.pct, 70, 90);
+    qs('#sv-ram-sub').textContent = fmtBytes(m.ram.used) + ' من ' + fmtBytes(m.ram.total);
+    qs('#sv-dl').textContent = fmtSpeed(m.net.rxSpeed);
+    qs('#sv-dl-sub').textContent = 'إجمالي ' + fmtBytes(m.net.rxTotal);
+    qs('#sv-ul').textContent = fmtSpeed(m.net.txSpeed);
+    qs('#sv-ul-sub').textContent = 'إجمالي ' + fmtBytes(m.net.txTotal);
+    drawMonitorChart(m.history || []);
+    const disk = m.disk ? (fmtBytes(m.disk.used) + ' من ' + fmtBytes(m.disk.total) + ' (' + m.disk.pct + '%)') : 'غير متاح';
+    const alert = (m.cpuPct >= 85 || m.ram.pct >= 90 || (m.disk && m.disk.pct >= 90));
+    const st = qs('#sv-status');
+    st.textContent = alert ? '🔴 ضغط مرتفع — راقب السيرفر' : (m.cpuPct >= 55 || m.ram.pct >= 70) ? '🟡 حمل متوسط' : '🟢 طبيعي';
+    st.className = 'mon-chip ' + (alert ? 'bad' : (m.cpuPct >= 55 || m.ram.pct >= 70) ? 'warn' : 'ok');
+    qs('#sv-details').innerHTML =
+      detailRow('💽 القرص', disk) +
+      detailRow('⏱️ مدة تشغيل السيرفر', fmtDur(m.uptime)) +
+      detailRow('⚡ مدة تشغيل الخادم (Node)', fmtDur(m.runSec)) +
+      detailRow('📺 القنوات', m.runningChannels + ' تعمل / ' + m.totalChannels + ' كلياً') +
+      detailRow('🧠 ذاكرة عملية Node', fmtBytes(m.nodeRss)) +
+      detailRow('🖥️ النظام', m.cpuCores + ' نواة · ' + navigator.platform);
+  }catch(_){}
+}
+
 /* ---------- init ---------- */
 function init(){
   loadStats();
@@ -724,6 +868,7 @@ function init(){
 setInterval(loadStats, 6000);
 setInterval(loadChannels, 10000);
 setInterval(loadUsers, 6000); // يحدّث عدّاد أجهزة المشتركين حيّاً
+setInterval(() => { if (state.page === 'server') loadMonitor(); }, 2000); // مراقبة حية
 
 if (token) enter();
 </script>

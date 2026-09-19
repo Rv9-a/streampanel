@@ -4,6 +4,7 @@ const axios = require('axios');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const path = require('path');
+const os = require('os');
 const sqlite3 = require('sqlite3').verbose();
 const NodeMediaServer = require('node-media-server');
 
@@ -663,6 +664,136 @@ function cleanStaleCache() {
 }
 setInterval(cleanStaleCache, 5 * 60 * 1000);
 
+// ═══════════════ مراقبة صحة السيرفر (معالج / رام / إنترنت / قرص) ═══════════════
+const monitor = {
+    cpuPct: 0,
+    cpuCores: os.cpus().length,
+    ramTotal: os.totalmem(),
+    ramUsed: 0,
+    ramPct: 0,
+    nodeRss: 0,
+    rxSpeed: 0, // بايت/ثانية نازل
+    txSpeed: 0, // بايت/ثانية طالع
+    rxTotal: 0,
+    txTotal: 0,
+    disk: null,
+    runningChannels: 0,
+    totalChannels: 0,
+    history: []
+};
+const MONITOR_HISTORY_MAX = 120; // نقطة كل ثانيتين = آخر 4 دقائق
+
+let _cpuPrev = { total: 0, idle: 0 };
+function sampleCpu() {
+    const cpus = os.cpus();
+    let idle = 0, total = 0;
+    for (const c of cpus) {
+        idle += c.times.idle;
+        total += c.times.user + c.times.nice + c.times.sys + c.times.idle + c.times.irq;
+    }
+    const dt = total - _cpuPrev.total;
+    const di = idle - _cpuPrev.idle;
+    if (dt > 0 && _cpuPrev.total > 0) {
+        monitor.cpuPct = Math.max(0, Math.min(100, 100 * (1 - di / dt)));
+    }
+    _cpuPrev = { total, idle };
+}
+
+function updateMem() {
+    monitor.ramTotal = os.totalmem();
+    monitor.ramUsed = monitor.ramTotal - os.freemem();
+    monitor.ramPct = Math.round(100 * monitor.ramUsed / monitor.ramTotal);
+    monitor.nodeRss = process.memoryUsage().rss;
+}
+
+let _netPrev = { rx: 0, tx: 0, t: 0 };
+function readNetCounters(cb) {
+    if (process.platform === 'win32') {
+        const cmd = `$a = Get-NetAdapterStatistics -ErrorAction SilentlyContinue; '{"rx":' + (($a | Measure-Object ReceivedBytes -Sum).Sum) + ',"tx":' + (($a | Measure-Object SentBytes -Sum).Sum) + '}'`;
+        const p = spawn('powershell', ['-NoProfile', '-Command', cmd]);
+        let out = '';
+        p.stdout.on('data', d => out += d);
+        p.on('close', () => {
+            try { cb(JSON.parse(out.trim())); } catch (e) { cb(null); }
+        });
+        setTimeout(() => { if (p.exitCode === null) { try { p.kill(); } catch (e) {} } }, 3000);
+    } else {
+        fs.readFile('/proc/net/dev', 'utf8', (err, data) => {
+            if (err) return cb(null);
+            let rx = 0, tx = 0;
+            for (const line of data.split('\n')) {
+                const m = /\s*([^:\s]+):\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+\d+\s+(\d+)/.exec(line);
+                if (m && m[1] !== 'lo') { rx += parseInt(m[2], 10); tx += parseInt(m[3], 10); }
+            }
+            cb({ rx, tx });
+        });
+    }
+}
+
+function updateNet() {
+    readNetCounters((n) => {
+        if (!n) return;
+        const now = Date.now();
+        if (_netPrev.t > 0) {
+            const dt = (now - _netPrev.t) / 1000;
+            if (dt > 0) {
+                monitor.rxSpeed = Math.max(0, (n.rx - _netPrev.rx) / dt);
+                monitor.txSpeed = Math.max(0, (n.tx - _netPrev.tx) / dt);
+            }
+        }
+        _netPrev = { rx: n.rx, tx: n.tx, t: now };
+        monitor.rxTotal = n.rx;
+        monitor.txTotal = n.tx;
+    });
+}
+
+function updateDisk() {
+    if (process.platform === 'win32') {
+        const drive = path.parse(__dirname).root.replace('\\', '');
+        const cmd = `$d=(Get-PSDrive -Name ${drive} -ErrorAction SilentlyContinue); if($d){[pscustomobject]@{free=$d.Free;used=$d.Used}}else{[pscustomobject]@{free=0;used=0}} | ConvertTo-Json -Compress`;
+        const p = spawn('powershell', ['-NoProfile', '-Command', cmd]);
+        let out = '';
+        p.stdout.on('data', d => out += d);
+        p.on('close', () => {
+            try {
+                const j = JSON.parse(out.trim());
+                monitor.disk = { free: j.free, used: j.used, total: j.free + j.used, pct: j.free + j.used ? Math.round(100 * j.used / (j.free + j.used)) : 0 };
+            } catch (e) { monitor.disk = null; }
+        });
+    } else {
+        const p = spawn('df', ['-P', __dirname]);
+        let out = '';
+        p.stdout.on('data', d => out += d);
+        p.on('close', () => {
+            try {
+                const parts = out.trim().split('\n')[1].trim().split(/\s+/);
+                const total = parseInt(parts[1], 10) * 1024;
+                const used = parseInt(parts[2], 10) * 1024;
+                monitor.disk = { free: total - used, used, total, pct: total ? Math.round(100 * used / total) : 0 };
+            } catch (e) { monitor.disk = null; }
+        });
+    }
+}
+
+function recordHistory() {
+    monitor.runningChannels = Object.keys(ffmpegProcesses).length;
+    monitor.totalChannels = Object.keys(channelTypes).length;
+    monitor.history.push({
+        t: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+        cpu: Math.round(monitor.cpuPct),
+        ram: monitor.ramPct,
+        rx: monitor.rxSpeed,
+        tx: monitor.txSpeed
+    });
+    if (monitor.history.length > MONITOR_HISTORY_MAX) monitor.history.shift();
+}
+
+setInterval(() => { sampleCpu(); updateMem(); recordHistory(); }, 2000);
+setInterval(updateNet, 4000);
+setInterval(updateDisk, 30000);
+updateNet();
+updateDisk();
+
 const serveChannelPlaylist = (req, res) => {
     const username = req.params.username;
     const password = req.params.password;
@@ -1006,6 +1137,23 @@ app.get('/api/stats', checkAdmin, (req, res) => {
                 groups: Object.entries(groups).map(([name, count]) => ({ name, count }))
             });
         });
+    });
+});
+
+// سلامة السيرفر: لحظي (متجدد داخلياً كل ثانيتين) + غراف آخر 4 دقائق
+app.get('/api/monitor', checkAdmin, (req, res) => {
+    res.json({
+        cpuPct: Math.round(monitor.cpuPct),
+        cpuCores: os.cpus().length,
+        ram: { used: monitor.ramUsed, total: monitor.ramTotal, pct: monitor.ramPct },
+        nodeRss: monitor.nodeRss,
+        net: { rxSpeed: monitor.rxSpeed, txSpeed: monitor.txSpeed, rxTotal: monitor.rxTotal, txTotal: monitor.txTotal },
+        disk: monitor.disk,
+        uptime: os.uptime(),
+        runSec: process.uptime(),
+        runningChannels: Object.keys(ffmpegProcesses).length,
+        totalChannels: Object.keys(channelTypes).length,
+        history: monitor.history
     });
 });
 
