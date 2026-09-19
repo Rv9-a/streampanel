@@ -76,7 +76,6 @@ const DEVICE_SESSION_TIMEOUT = 60000; // 60s بدون أي طلب مقطع = ا�
 const channelRetries = {};
 const channelAlwaysOn = {};
 const channelLastAccess = {};
-const MAX_CHANNEL_RETRIES = 5;
 const IDLE_TIMEOUT_MS = 86400000; // 24 hours – channels stay “always on”
 const IDLE_CHECK_MS = 60000;       // check once per minute
 
@@ -350,37 +349,84 @@ function getHeadersForUrl(url) {
     return HEADERS;
 }
 
+// كاش آخر قائمة ناجحة لكل رابط — يُعاد بدل 500 عند هفوة مؤقتة في المصدر،
+// فتبقى قناة ffmpeg حية ولا تنقطع العملية (السبب الرئيسي لتذبذب عدد القنوات الشغالة)
+const proxyM3u8Cache = {}; // { [url]: { body, at } }
+const PROXY_CACHE_TTL = 25000; // 25 ثانية
+
+function pruneProxyCache() {
+    const now = Date.now();
+    for (const k of Object.keys(proxyM3u8Cache)) {
+        if (now - proxyM3u8Cache[k].at > PROXY_CACHE_TTL) delete proxyM3u8Cache[k];
+    }
+    const keys = Object.keys(proxyM3u8Cache);
+    if (keys.length > 500) {
+        keys.sort((a, b) => proxyM3u8Cache[a].at - proxyM3u8Cache[b].at)
+            .slice(0, keys.length - 400)
+            .forEach(k => delete proxyM3u8Cache[k]);
+    }
+}
+
+function fetchWithRetry(url, attempts = 2, delayMs = 1200) {
+    return new Promise((resolve, reject) => {
+        const tryOnce = (left) => {
+            axios.get(url, { responseType: 'arraybuffer', headers: getHeadersForUrl(url), timeout: 20000 })
+                .then(resolve)
+                .catch((err) => {
+                    if (left > 1) setTimeout(() => tryOnce(left - 1), delayMs);
+                    else reject(err);
+                });
+        };
+        tryOnce(attempts);
+    });
+}
+
 app.get('/proxy-seg', async (req, res) => {
     let targetUrl = req.query.url;
     if (!targetUrl) return res.status(400).send('Missing URL');
 
     const isRotana = targetUrl.includes('rotana.hibridcdn.net');
+    const isPlaylist = targetUrl.includes('.m3u8') || targetUrl.includes('.json');
 
-    try {
-        const response = await axios.get(targetUrl, {
-            responseType: 'arraybuffer',
-            headers: getHeadersForUrl(targetUrl),
-            timeout: 15000
-        });
+    // ── القوائم (m3u8/json) ──
+    if (isPlaylist) {
+        let response;
+        try {
+            response = await fetchWithRetry(targetUrl);
+        } catch (err) {
+            const c = proxyM3u8Cache[targetUrl];
+            if (c && Date.now() - c.at < PROXY_CACHE_TTL) {
+                res.setHeader('Content-Type', 'application/x-mpegURL');
+                res.setHeader('X-Proxy-Cache', 'hit');
+                return res.send(c.body);
+            }
+            if (isRotana) console.log(`[Proxy-Rotana] ERROR ${err.code || err.message} on ${targetUrl.slice(-80)}`);
+            return res.status(503).send("Proxy Error");
+        }
 
         let buffer = Buffer.from(response.data);
+        res.setHeader('Content-Type', 'application/x-mpegURL');
+        let text = buffer.toString('utf8');
+        const baseUri = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+        let modified = text.split('\n').map(line => {
+            let trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) return line;
+            if (trimmed.startsWith('http')) {
+                return `http://127.0.0.1:${PORT}/proxy-seg?url=${encodeURIComponent(trimmed)}`;
+            }
+            const resolved = new URL(trimmed, baseUri).href;
+            return `http://127.0.0.1:${PORT}/proxy-seg?url=${encodeURIComponent(resolved)}`;
+        }).join('\n');
+        pruneProxyCache();
+        proxyM3u8Cache[targetUrl] = { body: modified, at: Date.now() };
+        return res.send(modified);
+    }
 
-        if (targetUrl.includes('.m3u8') || targetUrl.includes('.json')) {
-            if (isRotana) console.log(`[Proxy-Rotana] m3u8 OK ${buffer.length}b from ${targetUrl.slice(-60)}`);
-            res.setHeader('Content-Type', 'application/x-mpegURL');
-            let text = buffer.toString('utf8');
-            const baseUri = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
-            let modified = text.split('\n').map(line => {
-                let trimmed = line.trim();
-                if (!trimmed || trimmed.startsWith('#')) return line;
-                if (trimmed.startsWith('http')) {
-                    return `http://127.0.0.1:${PORT}/proxy-seg?url=${encodeURIComponent(trimmed)}`;
-                }
-                const resolved = new URL(trimmed, baseUri).href;
-                return `http://127.0.0.1:${PORT}/proxy-seg?url=${encodeURIComponent(resolved)}`;
-            }).join('\n');
-            return res.send(modified);
-        }
+    // ── القطع (TS) — محاولتان بفاصل قصير لامتصاص الهفوات ──
+    try {
+        const response = await fetchWithRetry(targetUrl);
+
+        let buffer = Buffer.from(response.data);
 
         let cleanBuffer = buffer;
         if (buffer.length > 1280 && buffer[1280] === 0x47) {
@@ -403,7 +449,7 @@ app.get('/proxy-seg', async (req, res) => {
 
     } catch (err) {
         if (isRotana) console.log(`[Proxy-Rotana] ERROR ${err.code || err.message} on ${targetUrl.slice(-80)}`);
-        res.status(500).send("Proxy Error");
+        res.status(502).send("Proxy Error");
     }
 });
 
@@ -556,16 +602,16 @@ function scheduleChannelRetry(id, isRtmp = false) {
         return;
     }
 
-    const maxRetries = alwaysOn ? MAX_CHANNEL_RETRIES : 3;
-    if (attempt >= maxRetries) {
+    const maxRetries = alwaysOn ? Infinity : 3;
+    if (!alwaysOn && attempt >= maxRetries) {
         console.error(`[FFmpeg stop - ${id}]: max retries reached, stopping`);
         channelRetries[id] = 0;
         return;
     }
     channelRetries[id] = attempt + 1;
-    const delays = alwaysOn ? [3000, 15000, 30000, 60000, 120000] : [3000, 6000, 12000];
+    const delays = alwaysOn ? [3000, 10000, 20000, 40000, 60000, 120000] : [3000, 6000, 12000];
     const delay = delays[Math.min(attempt, delays.length - 1)];
-    console.log(`[FFmpeg retry - ${id}]: attempt ${attempt + 1}/${maxRetries} in ${delay / 1000}s`);
+    console.log(`[FFmpeg retry - ${id}]: attempt ${attempt + 1}${alwaysOn ? '' : '/' + maxRetries} in ${delay / 1000}s`);
     setTimeout(() => {
         db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
             if (ch && !ffmpegProcesses[id]) {
