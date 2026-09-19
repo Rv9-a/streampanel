@@ -98,6 +98,7 @@ const MAX_FFMPEG = (() => {
 const quotaEvicted = new Set(); // قنوات خرجت قسراً بسبب السقف — لا تُعاد تلقائياً بل عند الطلب
 let bootQueue = [];             // طابور الإقلاع المتدرج
 let bootQueueRunning = false;   // علم: جارٍ تفريغ طابور الإقلاع
+const manuallyStopped = new Set(); // قنوات أوقفها المستخدم يدوياً من اللوحة — لا تُعاد تلقائياً، بل عند الطلب
 const IDLE_TIMEOUT_MS = 86400000; // 24 hours – channels stay “always on”
 const IDLE_CHECK_MS = 60000;       // check once per minute
 
