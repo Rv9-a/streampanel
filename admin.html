@@ -181,6 +181,7 @@ body{
 .bd-demand{background:rgba(148,163,184,.12);color:#cbd5e1;border:1px solid rgba(148,163,184,.3)}
 .bd-proxy{background:rgba(168,85,247,.14);color:#e9d5ff;border:1px solid rgba(168,85,247,.35)}
 .bd-direct{background:rgba(52,211,153,.13);color:#a7f3d0;border:1px solid rgba(52,211,153,.35)}
+.bd-stop{background:rgba(248,113,113,.14);color:#fecaca;border:1px solid rgba(248,113,113,.4)}
 .status{border-radius:20px;padding:5px 12px;font-size:12px;font-weight:700;display:flex;align-items:center;gap:7px;white-space:nowrap}
 .status .dot{width:8px;height:8px;border-radius:50%}
 .st-run{background:rgba(52,211,153,.12);color:var(--ok);border:1px solid rgba(52,211,153,.3)}
@@ -392,6 +393,16 @@ body{
             </div>
             <button type="submit" class="btn btn-primary full">💾 حفظ القناة</button>
           </form>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-h"><h3>⚙️ خدمة البث</h3><span style="color:var(--muted);font-size:12px" id="sv-group-label">المجموعة الحالية: كل القنوات</span></div>
+        <div class="section-b" style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-ok btn-sm" onclick="groupStart()">▶ تشغيل المجموعة الحالية</button>
+          <button class="btn btn-warn btn-sm" onclick="groupStop()">⏹ إيقاف المجموعة الحالية</button>
+          <button class="btn btn-warn btn-sm" onclick="resetStreams()">🔄 ترسيت خدمة البث</button>
+          <button class="btn btn-danger btn-sm" onclick="resetServer()">🔁 ترسيت السيرفر كامل</button>
         </div>
       </div>
 
@@ -637,6 +648,7 @@ async function loadChannels(){
     state.channels = await res.json();
     buildChips();
     renderChannels();
+    updateGroupLabel();
   }catch(_){}
 }
 async function loadUsers(){
@@ -656,7 +668,13 @@ function buildChips(){
   qs('#ch-chips').innerHTML = chips.map(([v,l,n]) => `
     <div class="chip ${state.chGroup===v?'active':''}" onclick="setGroup('${v.replace(/'/g,"\\'")}')">${l} <span class="n">${n}</span></div>`).join('');
 }
-function setGroup(g){ state.chGroup = g; buildChips(); renderChannels(); }
+function setGroup(g){ state.chGroup = g; buildChips(); renderChannels(); updateGroupLabel(); }
+function updateGroupLabel(){
+  const el = qs('#sv-group-label'); if (!el) return;
+  const target = state.chGroup || 'all';
+  const count = state.channels.filter(c => target === 'all' || (c.group_title || 'سيرفر 1') === target).length;
+  el.textContent = 'المجموعة الحالية: ' + (target === 'all' ? 'كل القنوات' : target) + ' (' + count + ' قناة)';
+}
 
 function renderChannels(){
   const q = state.chSearch.trim().toLowerCase();
@@ -674,15 +692,59 @@ function renderChannels(){
         <div class="ch-id">${c.id}</div>
         <div class="ch-badges">
           <span class="badge bd-group">${c.group_title || 'سيرفر 1'}</span>
+          ${c.stopped?'<span class="badge bd-stop">⏹ موقفة يدوياً</span>':''}
           <span class="badge ${c.always_on?'bd-always':'bd-demand'}">${c.always_on?'🔁 دائماً':'⏸ عند الطلب'}</span>
           <span class="badge ${parseInt(c.stream_type)===1?'bd-direct':'bd-proxy'}">${parseInt(c.stream_type)===1?'📡 مباشر':'🔒 بروكسي'}</span>
         </div>
       </div>
-      <span class="status ${c.running?'st-run':'st-idle'}"><span class="dot"></span>${c.running?'تعمل':'خاملة'}</span>
+      <span class="status ${c.running?'st-run':(c.stopped?'st-idle':'st-idle')}"><span class="dot"></span>${c.running?'تعمل':(c.stopped?'موقفة':'خاملة')}</span>
       <div class="ch-actions">
+        ${c.running
+          ? '<button class="btn btn-warn btn-sm" title="إيقاف القناة" onclick="stopChannel(\'' + c.id.replace(/'/g,"\\'") + '\')">⏹</button>'
+          : '<button class="btn btn-ok btn-sm" title="تشغيل القناة" onclick="startChannel(\'' + c.id.replace(/'/g,"\\'") + '\')">▶</button>'}
         <button class="btn btn-danger btn-sm" onclick="deleteChannel('${c.id.replace(/'/g,"\\'")}')">🗑</button>
       </div>
     </div>`).join('');
+}
+
+async function stopChannel(id){
+  if (!await confirmDialog('إيقاف القناة «' + id + '»؟ ستبقى متوقفة حتى تشغيلها يدوياً')) return;
+  await api('/api/channels/stop', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}) });
+  toast('تم إيقاف ' + id);
+  loadChannels(); loadStats();
+}
+async function startChannel(id){
+  await api('/api/channels/start', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}) });
+  toast('تم تشغيل ' + id);
+  loadChannels(); loadStats();
+}
+async function groupStart(){
+  const target = state.chGroup || 'all';
+  const label = target === 'all' ? 'كل القنوات' : target;
+  if (!await confirmDialog('تشغيل «' + label + '»؟')) return;
+  await api('/api/groups/start', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({group: target}) });
+  toast('تم تشغيل ' + label);
+  loadChannels(); loadStats();
+}
+async function groupStop(){
+  const target = state.chGroup || 'all';
+  const label = target === 'all' ? 'كل القنوات' : target;
+  if (!await confirmDialog('إيقاف «' + label + '»؟')) return;
+  await api('/api/groups/stop', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({group: target}) });
+  toast('تم إيقاف ' + label);
+  loadChannels(); loadStats();
+}
+async function resetStreams(){
+  if (!await confirmDialog('ترسيت خدمة البث الآن؟ سيُوقف كل العمليات ويعاد تشغيل كل القنوات')) return;
+  await api('/api/reset/streams', { method:'POST' });
+  toast('تم ترسيت البث — تُعاد كل القنوات');
+  setTimeout(()=>{ loadChannels(); loadStats(); }, 2000);
+}
+async function resetServer(){
+  if (!await confirmDialog('ترسيت السيرفر كامل؟ سيتوقف ~ثانيتين ثم يعود للعمل')) return;
+  await api('/api/reset/server', { method:'POST' });
+  toast('جارِ ترسيت السيرفر...');
+  setTimeout(()=>location.reload(), 4000);
 }
 
 async function deleteChannel(id){

@@ -76,6 +76,7 @@ const DEVICE_SESSION_TIMEOUT = 60000; // 60s بدون أي طلب مقطع = ا�
 const channelRetries = {};
 const channelAlwaysOn = {};
 const channelLastAccess = {};
+const manuallyStopped = new Set(); // قنوات أوقفها المشغل يدوياً — لا تُعاد تلقائياً
 const IDLE_TIMEOUT_MS = 86400000; // 24 hours – channels stay “always on”
 const IDLE_CHECK_MS = 60000;       // check once per minute
 
@@ -562,12 +563,14 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
 
     proc.on('error', (err) => {
         console.error(`[FFmpeg error - ${id}]: ${err.message}`);
-        delete ffmpegProcesses[id];
+        // احذف المرجع فقط لو ما زال يخص هذه العملية (لا يمس عمل أحدث منها)
+        if (ffmpegProcesses[id] === proc) delete ffmpegProcesses[id];
         scheduleChannelRetry(id, isRtmp);
     });
 
     proc.on('close', (code) => {
-        delete ffmpegProcesses[id];
+        // نفس الحماية: عند إيقاف/إعادة تشغيل يدوية قد تأتي عملية جديدة قبل close القديمة
+        if (ffmpegProcesses[id] === proc) delete ffmpegProcesses[id];
         if (code !== 0) {
             console.error(`[FFmpeg exit - ${id}]: code ${code}`);
             scheduleChannelRetry(id, isRtmp);
@@ -579,6 +582,11 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
 
 function scheduleChannelRetry(id, isRtmp = false) {
     if (ffmpegProcesses[id]) return;
+
+    if (manuallyStopped.has(id)) {
+        console.log(`[FFmpeg stopped by user - ${id}]: not retrying`);
+        return;
+    }
 
     const alwaysOn = !!channelAlwaysOn[id];
 
@@ -634,6 +642,29 @@ function cleanChannelDir(id) {
     } catch (err) {
         console.error(`[cleanDir - ${id}]: ${err.message}`);
     }
+}
+
+// ─── أوامر التشغيل / الإيقاف اليدوي (من اللوحة) ───
+function stopChannelProcess(id) {
+    if (ffmpegProcesses[id]) {
+        try { ffmpegProcesses[id].kill('SIGKILL'); } catch (e) {}
+        delete ffmpegProcesses[id];
+    }
+    delete channelRetries[id];
+    channelAlwaysOn[id] = false;
+    manuallyStopped.add(id);
+    cleanChannelDir(id);
+    console.log(`[Manual stop - ${id}]: channel stopped by operator`);
+}
+
+function startChannelNow(id) {
+    manuallyStopped.delete(id);
+    channelAlwaysOn[id] = true;
+    db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
+        if (err || !ch) return;
+        if (!ffmpegProcesses[id]) startChannelProcess(ch.id, ch.url, ch.stream_type, true, ch.group_title);
+        console.log(`[Manual start - ${id}]: channel started by operator`);
+    });
 }
 
 const DUMMY_DIR = path.join(__dirname, 'dummy_sep');
@@ -862,6 +893,15 @@ const serveChannelPlaylist = (req, res) => {
 
             channelLastAccess[channelId] = Date.now();
 
+            // قناة أوقفها المشغل يدوياً — تبقى متوقفة حتى يعيد تشغيلها،
+            // ونُعيد قائمة فارغة بدل بدء العملية تلقائياً
+            if (manuallyStopped.has(channelId)) {
+                res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                return res.send('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXT-X-MEDIA-SEQUENCE:0\n');
+            }
+
             if (channel.url && channel.url.startsWith('dummy://')) {
                 return res.redirect(`/live/${username}/${password}/dummy_sep/index.m3u8`);
             }
@@ -948,7 +988,8 @@ channels.forEach(ch => {
                 m3uContent += `#EXTINF:-1 tvg-id="${ch.id}" tvg-name="${ch.name}" group-title="${groupName}",${ch.name}\n`;
                 m3uContent += `http://${host}/live/${username}/${password}/${ch.id}.m3u8\n`;
                 // Mark channel as "always on" – exempt from idle timeout
-                channelAlwaysOn[ch.id] = true;
+                // (القنوات الموقوفة يدوياً لا تُعاد تفعيلها هنا)
+                if (!manuallyStopped.has(ch.id)) channelAlwaysOn[ch.id] = true;
             });
 
             res.setHeader('Content-Type', 'audio/x-mpegurl');
@@ -1122,7 +1163,7 @@ const checkAdmin = (req, res, next) => {
 
 app.get('/api/channels', checkAdmin, (req, res) => {
     db.all(`SELECT * FROM channels`, [], (err, rows) => {
-        res.json(rows.map(r => ({ ...r, running: !!ffmpegProcesses[r.id] })));
+        res.json(rows.map(r => ({ ...r, running: !!ffmpegProcesses[r.id], stopped: manuallyStopped.has(r.id) })));
     });
 });
 
@@ -1151,9 +1192,74 @@ app.post('/api/channels/delete', checkAdmin, (req, res) => {
     delete channelAlwaysOn[id];
     delete channelLastAccess[id];
     delete channelRetries[id];
+    manuallyStopped.delete(id);
     db.run(`DELETE FROM channels WHERE id = ?`, [id], () => {
         rebuildXtreamMaps(() => res.json({ success: true }));
     });
+});
+
+// ─── أزرار التشغيل / الإيقاف (قناة، مجموعة، خدمة، سيرفر) ───
+app.post('/api/channels/stop', checkAdmin, (req, res) => {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'id required' });
+    stopChannelProcess(id);
+    res.json({ success: true });
+});
+
+app.post('/api/channels/start', checkAdmin, (req, res) => {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'id required' });
+    startChannelNow(id);
+    res.json({ success: true });
+});
+
+app.post('/api/groups/stop', checkAdmin, (req, res) => {
+    const group = req.body.group || 'all';
+    db.all(`SELECT id, group_title FROM channels`, [], (err, rows) => {
+        const targets = (rows || []).filter(r => group === 'all' || r.group_title === group);
+        targets.forEach(r => stopChannelProcess(r.id));
+        res.json({ success: true, stopped: targets.length });
+    });
+});
+
+app.post('/api/groups/start', checkAdmin, (req, res) => {
+    const group = req.body.group || 'all';
+    db.all(`SELECT * FROM channels`, [], (err, rows) => {
+        const targets = (rows || []).filter(r => group === 'all' || r.group_title === group);
+        targets.forEach(r => startChannelNow(r.id));
+        res.json({ success: true, started: targets.length });
+    });
+});
+
+// ترسيت خدمة البث: يوقف كل العمليات ويعيد تشغيل كل القنوات من جديد (مع مسح الإيقافات اليدوية)
+app.post('/api/reset/streams', checkAdmin, (req, res) => {
+    for (const id of Object.keys(ffmpegProcesses)) {
+        try { ffmpegProcesses[id].kill('SIGKILL'); } catch (e) {}
+        delete ffmpegProcesses[id];
+    }
+    for (const id of Object.keys(channelRetries)) delete channelRetries[id];
+    manuallyStopped.clear();
+    db.all(`SELECT * FROM channels`, [], (err, rows) => {
+        const list = (rows || []);
+        list.forEach(r => { channelAlwaysOn[r.id] = true; });
+        const launchable = list.filter(r => !r.url.startsWith('dummy://'));
+        launchable.forEach(r => startChannelProcess(r.id, r.url, r.stream_type, true, r.group_title));
+        console.log(`[/api/reset/streams]: restarting ${launchable.length} channels`);
+        res.json({ success: true, started: launchable.length });
+    });
+});
+
+// ترسيت السيرفر كامل: يطلق نسخة جديدة بنفس الكود ثم يغلق هذه — عودة للعمل خلال ثوانٍ
+app.post('/api/reset/server', checkAdmin, (req, res) => {
+    res.json({ success: true });
+    console.log('[/api/reset/server]: restarting panel server...');
+    const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+        detached: true,
+        stdio: ['ignore', 'inherit', 'inherit'],
+        windowsHide: true
+    });
+    child.unref();
+    setTimeout(() => process.exit(0), 1500);
 });
 
 app.get('/api/users', checkAdmin, (req, res) => {
