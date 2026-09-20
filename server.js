@@ -274,6 +274,12 @@ db.serialize(() => {
 const groupSS = 'bein ss';
 const groupAlwan = 'alwan sport';
 
+// قنوات مباشرة تُمرَّر عبر السيرفر بلا ffmpeg (صفر استهلاك معالج) — روابط من ملف M3U خارجي
+const PASSTHROUGH_TYPE = 2;
+const gaza = require('./gaza_channels.js');
+const gazaChannelHeaders = {};
+gaza.channels.forEach(c => { gazaChannelHeaders[c.id] = { ua: c.ua, ref: c.ref }; });
+
 const defaultChannels = [];
 const mk = (id, name, url, group, always = 0, streamType = 1) => [id, name, url, streamType, group, always];
 const sepCh = (id, label, group) => mk(`sep_${id}`, `════ ${label} ════`, SEP_URL, group);
@@ -314,6 +320,11 @@ defaultChannels.push(sepCh('alwan_hd', 'HD', groupAlwan));
 defaultChannels.push(sepCh('alwan_4k', '4K', groupAlwan));
 ['232601', '232602', '232603', '232604', '232605', '232606'].forEach((u, i) => {
     defaultChannels.push(mk(`alwan_4k${i + 1}`, `ALWAN SPORT ${i + 1} 4K`, `${ssBase}${u}.ts`, groupAlwan));
+});
+
+// قنوات AL BASHA TV (ابن غزة الجوكر): تُخزَّن للعرض فقط، وتعمل كتمرير مباشر بلا ffmpeg
+gaza.channels.forEach(c => {
+    defaultChannels.push(mk(c.id, c.name, c.url, c.group, 0, PASSTHROUGH_TYPE));
 });
 
 app.use('/hls', express.static(path.join(__dirname, 'dummy_sep')));
@@ -472,6 +483,12 @@ app.get('/debug/rotana', async (req, res) => {
 
 function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = '') {
     if (ffmpegProcesses[id]) return;
+
+    // قنوات التمرير المباشر: لا تُشغَّل إطلاقاً عبر ffmpeg (صفر استهلاك) — تُخدم عبر servePassthrough
+    if (parseInt(streamType, 10) === PASSTHROUGH_TYPE) {
+        channelAlwaysOn[id] = false;
+        return;
+    }
 
     channelAlwaysOn[id] = alwaysOn;
     if (!alwaysOn) console.log(`[On-Demand start - ${id}]: starting ffmpeg`);
@@ -867,6 +884,67 @@ setInterval(updateDisk, 30000);
 updateNet();
 updateDisk();
 
+const servePassthrough = (req, res, channel) => {
+    const src = channel.url;
+    if (!src || !src.startsWith('http')) return res.status(502).send('Source Error');
+
+    const hdrs = gazaChannelHeaders[channel.id] || {};
+    const headers = { 'User-Agent': hdrs.ua || HEADERS['User-Agent'], 'Accept': '*/*' };
+    if (hdrs.ref) headers['Referer'] = hdrs.ref;
+
+    const isPlaylist = /\.m3u8($|\?)/i.test(src) || /\.mpd($|\?)/i.test(src);
+
+    if (isPlaylist) {
+        // قائمة تشغيل (M3U8/MPD) — نجلبها ونعيد كتابة روابط المقاطع لكي تكون مطلقة على المصدر،
+        // فلا ننقّل أي بايتات عبر السيرفر
+        axios.get(src, { responseType: 'text', headers, timeout: 15000, maxRedirects: 5 })
+            .then(r => {
+                let body = String(r.data || '');
+                if (!body.trim().startsWith('#')) {
+                    // استجابة ليست قائمة — نعتبرها تدفقاً خاماً ونمرّره مباشرة
+                    return relayRaw(src, headers, res);
+                }
+                const base = src;
+                const rewritten = body.split('\n').map(line => {
+                    const t = line.trim();
+                    if (t && !t.startsWith('#')) {
+                        try { return new URL(t, base).href; } catch (e) { return line; }
+                    }
+                    return line;
+                }).join('\n');
+                const ct = /\.mpd($|\?)/i.test(src) ? 'application/dash+xml' : 'application/vnd.apple.mpegurl';
+                res.setHeader('Content-Type', ct);
+                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.send(rewritten);
+            })
+            .catch(() => {
+                if (!res.headersSent) return res.status(502).send('Source Error');
+                res.end();
+            });
+        return;
+    }
+
+    relayRaw(src, headers, res);
+};
+
+function relayRaw(src, headers, res) {
+    axios.get(src, { responseType: 'stream', headers, timeout: 0, maxRedirects: 5 })
+        .then(r => {
+            res.status(200);
+            res.setHeader('Content-Type', 'video/mp2t');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            r.data.on('error', () => { try { res.end(); } catch (e) {} });
+            res.on('close', () => { try { r.data.destroy(); } catch (e) {} });
+            r.data.pipe(res);
+        })
+        .catch(() => {
+            if (!res.headersSent) return res.status(502).send('Source Error');
+            res.end();
+        });
+}
+
 const serveChannelPlaylist = (req, res) => {
     const username = req.params.username;
     const password = req.params.password;
@@ -896,6 +974,11 @@ const serveChannelPlaylist = (req, res) => {
 
             if (channel.url && channel.url.startsWith('dummy://')) {
                 return res.redirect(`/live/${username}/${password}/dummy_sep/index.m3u8`);
+            }
+
+            // قناة تمرير مباشر: تمرّر بايتات المصدر حرفياً بلا ffmpeg ولا إعادة بث
+            if (parseInt(channel.stream_type, 10) === PASSTHROUGH_TYPE) {
+                return servePassthrough(req, res, channel);
             }
 
             const alwaysOn = !!channelAlwaysOn[channelId];
