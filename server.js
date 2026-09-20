@@ -233,13 +233,10 @@ db.serialize(() => {
         stmt.finalize(() => {
             console.log(`[DB] default channels ready: ${defaultChannels.length} total`);
 
-            db.run(`DELETE FROM channels WHERE id LIKE 'besp%'
-                    OR id IN ('4k', 'bein1_4k', 'bein2_4k', 'bein3_4k', 'bein4_4k', 'bein5_4k', 'bein6_4k', 'bein7_4k', 'bein8_4k', 'bein9_4k')
-                    OR id GLOB 'bein[0-9]*'
-                    OR id LIKE 'bein_src%'
-                    OR id LIKE 'alkass%'
-                    OR id LIKE 'rotana%'
-                    OR (id LIKE 'alwan%' AND id NOT LIKE 'alwan_hd%' AND id NOT LIKE 'alwan_4k%')`, (cleanErr) => {
+            // حذف كل ما ليس ضمن القائمة الحالية المحددة في الكود — يطابق قاعدة البيانات
+            // مع defaultChannels دائماً (ويمنع إحياء قنوات قديمة بروابط ميتة بعد إعادة التشغيل)
+            const keepPh = defaultChannels.map(() => '?').join(',');
+            db.run(`DELETE FROM channels WHERE id NOT IN (${keepPh})`, defaultChannels.map(c => c[0]), (cleanErr) => {
                 if (cleanErr) console.error('[DB] cleanup error:', cleanErr.message);
 
                 db.run(`UPDATE channels SET always_on = 1`, (upErr) => {
