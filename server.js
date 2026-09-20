@@ -81,6 +81,8 @@ const db = new sqlite3.Database(path.join(__dirname, 'panel.db'), (err) => {
 const channelTypes = {};
 const adminSessions = {};
 const ffmpegProcesses = {};
+const lastPlaylistCache = {}; // { [channelId]: { body, at } } — آخر قائمة HLS صالحة لسدّ فجوة إعادة تشغيل ffmpeg
+const LAST_PLAYLIST_TTL_MS = 90000; // تُخدم القائمة المخزنة لمدة 90 ثانية كحد أقصى
 const deviceSessions = {}; // { [username]: Map<deviceKey, { ip, lastActive }> }
 const streamIdMap = {}; // { <numeric xtream id>: channelId string }
 const categoryIdMap = {}; // { <numeric category id>: group_title }
@@ -481,7 +483,7 @@ app.get('/debug/rotana', async (req, res) => {
     res.json(result);
 });
 
-function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = '') {
+function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = '', mode = 'fresh') {
     if (ffmpegProcesses[id]) return;
 
     // قنوات التمرير المباشر: لا تُشغَّل إطلاقاً عبر ffmpeg (صفر استهلاك) — تُخدم عبر servePassthrough
@@ -497,8 +499,12 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
     if (!fs.existsSync(channelDir)) {
         fs.mkdirSync(channelDir, { recursive: true });
     }
-    // نبدأ بملفات نظيفة دائماً — يمنع اشتغال قوائم قديمة مع شرائح جديدة بعد إعادة تشغيل ffmpeg
-    cleanChannelDir(id);
+
+    const isResume = mode === 'resume';
+    // عند الاستئناف لا نمسح المجلد: نكمل ترقيم المقاطع من آخر ملف موجود على القرص
+    // حتى يبقى MEDIA-SEQUENCE تصاعدياً ولا يقفز المشغّل للخلف أثناء إعادة تشغيل ffmpeg.
+    if (!isResume) cleanChannelDir(id);
+    const hlsStartNumber = isResume ? nextSegmentNumber(channelDir) : 0;
 
     const isRtmp = url.startsWith('rtmp://');
     const isDirect = parseInt(streamType) === 1;
@@ -532,7 +538,7 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
     let rwTimeout = '30000000'; // 30 ثانية للجميع
 
     if (!isRtmp) {
-        ffmpegArgs.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '10');
+        ffmpegArgs.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_at_eof', '1', '-reconnect_delay_max', '10');
     }
 
     ffmpegArgs.push(
@@ -544,6 +550,9 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
         '-f', 'hls', 
         '-hls_time', hlsTime, 
         '-hls_list_size', hlsListSize, 
+        // لا نعيد الترقيم من صفر عند الاستئناف — نكمل من آخر مقطع على القرص فيبقى
+        // MEDIA-SEQUENCE متصاعداً ولا يرتد المشغّل لبداية الشريط (سبب التقطيع/التكرار)
+        '-hls_start_number', String(hlsStartNumber),
         // بدون delete_segments: الشرائح الخارجة من النافذة تبقى على القرص حتى ينظّفها
         // cleanStaleCache — فطلب مقطع قديم من مشغّل متأخر لا يعود 404 (سبب التقطيع)
         '-hls_flags', 'omit_endlist+temp_file+independent_segments',
@@ -613,7 +622,7 @@ function scheduleChannelRetry(id, isRtmp = false) {
         console.log(`[FFmpeg retry - ${id}]: RTMP waiting for source, retry in ${delay / 1000}s`);
         setTimeout(() => {
             db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
-                if (ch && !ffmpegProcesses[id]) startChannelProcess(ch.id, ch.url, ch.stream_type, !!channelAlwaysOn[id], ch.group_title);
+                if (ch && !ffmpegProcesses[id]) startChannelProcess(ch.id, ch.url, ch.stream_type, !!channelAlwaysOn[id], ch.group_title, 'resume');
             });
         }, delay);
         return;
@@ -633,10 +642,24 @@ function scheduleChannelRetry(id, isRtmp = false) {
         db.get(`SELECT * FROM channels WHERE id = ?`, [id], (err, ch) => {
             if (ch && !ffmpegProcesses[id]) {
                 channelRetries[id] = 0;
-                startChannelProcess(ch.id, ch.url, ch.stream_type, !!channelAlwaysOn[ch.id], ch.group_title);
+                startChannelProcess(ch.id, ch.url, ch.stream_type, !!channelAlwaysOn[ch.id], ch.group_title, 'resume');
             }
         });
     }, delay);
+}
+
+function nextSegmentNumber(dir) {
+    // يعيد الرقم الذي يجب أن يبدأ منه المقطع التالي: أكبر رقم موجود على القرص + 1،
+    // أو 0 إذا كان المجلد فارغاً. ملفات ffmpeg تُسمّى index0.ts, index1.ts...
+    let maxFound = -1;
+    try {
+        for (const f of fs.readdirSync(dir)) {
+            if (!f.startsWith('index') || !f.endsWith('.ts')) continue;
+            const num = parseInt(f.slice(5, -3), 10);
+            if (!isNaN(num) && num > maxFound) maxFound = num;
+        }
+    } catch (e) {}
+    return maxFound + 1;
 }
 
 function cleanChannelDir(id) {
@@ -985,7 +1008,7 @@ const serveChannelPlaylist = (req, res) => {
 
             if (!ffmpegProcesses[channelId]) {
                 if (!alwaysOn) cleanChannelDir(channelId);
-                startChannelProcess(channelId, channel.url, channel.stream_type, alwaysOn, channel.group_title);
+                startChannelProcess(channelId, channel.url, channel.stream_type, alwaysOn, channel.group_title, alwaysOn ? 'resume' : 'fresh');
             }
 
             channelLastAccess[channelId] = Date.now();
@@ -1026,9 +1049,17 @@ app.get(/^\/live\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/, (req, res) => {
         const ext = path.extname(file).toLowerCase();
         const isIndex = file === 'index.m3u8';
 
-        // placeholder: إذا index.m3u8 غير موجود لكن القناة معروفة → نعيد playlist فارغ
-        // بدلاً من 404 — بالتالي ينتظر الـ app (HLS retry) وتظهر القنوات فور جاهزيتها
+        // placeholder: إذا index.m3u8 غير موجود لكن القناة معروفة →
+        // نعيد آخر قائمة صالحة مخزّنة (إن وجدت وحديثة) بدل قائمة فارغة، فيكمل المشغّل
+        // بسلاسة أثناء فجوة إعادة تشغيل ffmpeg ولا يعيد الشريط من البداية.
         if (isIndex && !fs.existsSync(fullPath) && channelTypes[channelId] !== undefined) {
+            const cached = lastPlaylistCache[channelId];
+            if (cached && Date.now() - cached.at < LAST_PLAYLIST_TTL_MS) {
+                res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                return res.send(cached.body);
+            }
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.setHeader('Access-Control-Allow-Origin', '*');
@@ -1036,6 +1067,25 @@ app.get(/^\/live\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/, (req, res) => {
         }
 
         if (!fs.existsSync(fullPath)) return res.status(404).send('Not Found');
+
+        // نلتقط نسخة من آخر قائمة صالحة صادرة (لقنوات ffmpeg فقط، وليس dummy_sep)
+        if (ext === '.m3u8' && isIndex && !dummyStream && channelTypes[channelId] !== undefined) {
+            try {
+                const body = fs.readFileSync(fullPath, 'utf8');
+                if (!/^#EXTM3U/.test(body.trim())) {
+                    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+                    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    return res.send(body);
+                }
+                res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.send(body);
+                lastPlaylistCache[channelId] = { body, at: Date.now() };
+                return;
+            } catch (e) { /* fall to sendFile */ }
+        }
 
         if (ext === '.m3u8') {
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
