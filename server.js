@@ -236,7 +236,8 @@ db.serialize(() => {
             db.run(`DELETE FROM channels WHERE id LIKE 'besp%'
                     OR id IN ('4k')
                     OR (id LIKE 'alwan%' AND id NOT LIKE 'alwan_hd%' AND id NOT LIKE 'alwan_4k%')
-                    OR id IN ('bein1_4k', 'bein2_4k', 'bein3_4k', 'bein4_4k', 'bein5_4k', 'bein6_4k', 'bein7_4k', 'bein8_4k', 'bein9_4k')`, (cleanErr) => {
+                    OR id IN ('bein1_4k', 'bein2_4k', 'bein3_4k', 'bein4_4k', 'bein5_4k', 'bein6_4k', 'bein7_4k', 'bein8_4k', 'bein9_4k')
+                    OR id GLOB 'bein[0-9]*'`, (cleanErr) => {
                 if (cleanErr) console.error('[DB] cleanup error:', cleanErr.message);
 
                 db.run(`UPDATE channels SET always_on = 1`, (upErr) => {
