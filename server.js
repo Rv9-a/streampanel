@@ -535,6 +535,11 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
 
     if (!isRtmp) {
         ffmpegArgs.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '10');
+    } else {
+        // مدخلات RTMP من OBS قد تأتي بأزمنة مكررة/غير متصاعدة (dts: N>=N) عند سقوط إطارات
+        // من جهة الـencoder — تتسبب بتقطيع قوي "كأن الـfps ينزل" عند إعادة توليد HLS.
+        // نهملها ونعتمد على ساعة الوصول بدلاً منها فيبقى التسلسل الزمني سليماً دائماً.
+        ffmpegArgs.push('-use_wallclock_as_timestamps', '1');
     }
 
     ffmpegArgs.push(
