@@ -234,10 +234,12 @@ db.serialize(() => {
             console.log(`[DB] default channels ready: ${defaultChannels.length} total`);
 
             db.run(`DELETE FROM channels WHERE id LIKE 'besp%'
-                    OR id IN ('4k')
-                    OR (id LIKE 'alwan%' AND id NOT LIKE 'alwan_hd%' AND id NOT LIKE 'alwan_4k%')
-                    OR id IN ('bein1_4k', 'bein2_4k', 'bein3_4k', 'bein4_4k', 'bein5_4k', 'bein6_4k', 'bein7_4k', 'bein8_4k', 'bein9_4k')
-                    OR id GLOB 'bein[0-9]*'`, (cleanErr) => {
+                    OR id IN ('4k', 'bein1_4k', 'bein2_4k', 'bein3_4k', 'bein4_4k', 'bein5_4k', 'bein6_4k', 'bein7_4k', 'bein8_4k', 'bein9_4k')
+                    OR id GLOB 'bein[0-9]*'
+                    OR id LIKE 'bein_src%'
+                    OR id LIKE 'alkass%'
+                    OR id LIKE 'rotana%'
+                    OR (id LIKE 'alwan%' AND id NOT LIKE 'alwan_hd%' AND id NOT LIKE 'alwan_4k%')`, (cleanErr) => {
                 if (cleanErr) console.error('[DB] cleanup error:', cleanErr.message);
 
                 db.run(`UPDATE channels SET always_on = 1`, (upErr) => {
@@ -264,21 +266,16 @@ db.serialize(() => {
 });
 
     const SEP_URL = 'dummy://separator';
-const groupRV = 'bein rv';
 const groupSS = 'bein ss';
-const groupSrc = 'bein مصدر خاص';
-const groupAlK = 'الكاس alkass';
 const groupAlwan = 'alwan sport';
 
 const defaultChannels = [];
 const mk = (id, name, url, group, always = 0, streamType = 1) => [id, name, url, streamType, group, always];
 const sepCh = (id, label, group) => mk(`sep_${id}`, `════ ${label} ════`, SEP_URL, group);
 
-// ── bein rv (قناة rvtv فقط — removed the hijacked beIN1-7 sources) ──
-defaultChannels.push(mk('rvtv_event', 'Rvtv (live event)', 'rtmp://127.0.0.1:1935/live/event', groupRV, 1, 0));
-
-// ── bein ss ──
+// ── bein ss (باضافة قناة rvtv الخاصة) ──
 const ssBase = 'http://pro.netmos.ovh:7355/live/EXMOQNS9Y30998CX0/LKHSB87278DOKCPP/';
+defaultChannels.push(mk('rvtv_event', 'Rvtv (live event)', 'rtmp://127.0.0.1:1935/live/event', groupSS, 1, 0));
 const ss4k = ['221764', '221765', '221766', '221767', 'https://prime-fast.sytes.net/prime-tv/stream/78.m3u8', '221769', '221770', '221771'];
 defaultChannels.push(sepCh('ss_4k', '4K', groupSS));
 defaultChannels.push(mk('bein_ss_4k_true', 'bein 4K (true 4k)', `${ssBase}158960.ts`, groupSS));
@@ -304,25 +301,6 @@ defaultChannels.push(sepCh('ss_fhd', 'FHD', groupSS));
     defaultChannels.push(mk(`bein_ss_fhd${i + 1}`, `beinsport ${i + 1} FHD`, `${ssBase}${u}.ts`, groupSS));
 });
 
-// ── bein مصدر خاص ──
-const pfBase = 'https://prime-fast.sytes.net/prime-tv/stream/';
-defaultChannels.push(sepCh('src_4k', '4K', groupSrc));
-for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_src4k${i}`, `bein ${i} 4K`, `${pfBase}${73 + i}.m3u8`, groupSrc));
-defaultChannels.push(sepCh('src_uhd', 'UHD', groupSrc));
-for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcuhd${i}`, `bein sports ${i} (UHD)`, `http://fackyou-cdn5.cfd/BEIN-${i}/index.m3u8`, groupSrc));
-defaultChannels.push(sepCh('src_fhd', 'FHD', groupSrc));
-for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcfhd${i}`, `bein sports ${i} FHD`, `${pfBase}${62 + i}.m3u8`, groupSrc));
-defaultChannels.push(sepCh('src_hd', 'HD', groupSrc));
-for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srchd${i}`, `bein sports ${i} HD`, `${pfBase}${51 + i}.m3u8`, groupSrc));
-defaultChannels.push(sepCh('src_sd', 'SD', groupSrc));
-for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcsd${i}`, `bein sports ${i} SD`, `${pfBase}${24 + i}.m3u8`, groupSrc));
-defaultChannels.push(sepCh('src_mob', 'وقت المباريات', groupSrc));
-for (let i = 1; i <= 9; i++) defaultChannels.push(mk(`bein_srcmob${i}`, `bein sports ${i}`, `http://82.39.115.26:3000/live/${i}.m3u8`, groupSrc));
-
-// ── الكاس alkass ──
-const kWords = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
-for (let i = 0; i < 8; i++) defaultChannels.push(mk(`alkass${i + 1}`, `الكأس ${i + 1}`, `https://alkass.kianezidi.workers.dev/${kWords[i]}.m3u8`, groupAlK));
-
 // ── alwan sport ──
 defaultChannels.push(sepCh('alwan_hd', 'HD', groupAlwan));
 ['232595', '232596', '232597', '232598', '232599', '232600'].forEach((u, i) => {
@@ -332,21 +310,6 @@ defaultChannels.push(sepCh('alwan_4k', '4K', groupAlwan));
 ['232601', '232602', '232603', '232604', '232605', '232606'].forEach((u, i) => {
     defaultChannels.push(mk(`alwan_4k${i + 1}`, `ALWAN SPORT ${i + 1} 4K`, `${ssBase}${u}.ts`, groupAlwan));
 });
-
-// ── Rotana l روتانا (محمي — ريفير rotana.net حصرياً) ──
-const groupRot = 'Rotana l روتانا';
-const rotBase = 'https://rotana.hibridcdn.net/rotananet/';
-const rotChannels = [
-    ['rotana_cinema', 'Rotana Cinema', `cinema_net-7Y83PP5adWixDF93/playlist.m3u8`],
-    ['rotana_masr', 'Rotana Cinema Masr', `cinemamasr_net-7Y83PP5adWixDF93/playlist.m3u8`],
-    ['rotana_comedy', 'Rotana Comedy', `comedy_net-7Y83PP5adWixDF93/playlist.m3u8`],
-    ['rotana_classical', 'Rotana Classical', `classical_net-7Y83PP5adWixDF93/playlist.m3u8`],
-    ['rotana_drama', 'Rotana Drama', `drama_net-7Y83PP5adWixDF93/playlist.m3u8`],
-    ['rotana_khaleejiya', 'Rotana Khaleejiya', `khaleejiya_net-7Y83PP5adWixDF93/playlist.m3u8`],
-    ['rotana_lbc', 'Rotana LBC', `lbc_net-7Y83PP5adWixDF93/playlist.m3u8`],
-    ['rotana_risala', 'Rotana Risala', `risala_net-7Y83PP5adWixDF93/playlist.m3u8`]
-];
-rotChannels.forEach(c => defaultChannels.push(mk(c[0], c[1], `${rotBase}${c[2]}`, groupRot, 0, 0)));
 
 app.use('/hls', express.static(path.join(__dirname, 'dummy_sep')));
 
@@ -517,7 +480,6 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
 
     const isRtmp = url.startsWith('rtmp://');
     const isDirect = parseInt(streamType) === 1;
-    const isBeinRv = group === groupRV && !isRtmp; // buffered mode: bein rv only, NOT rvtv_event
 
     let inputSource = url;
     if (!isRtmp && !isDirect) {
@@ -541,10 +503,6 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
     let hlsTime = '5';
     let hlsListSize = '6';
     let rwTimeout = '30000000'; // 30 ثانية للجميع
-
-    if (isBeinRv) {
-        rwTimeout = '60000000'; // مصادر bein rv متقلّبة — مهلة قراءة أطول (60 ثانية)
-    }
 
     if (!isRtmp) {
         ffmpegArgs.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '10');
