@@ -15,6 +15,14 @@ const PORT = 3000;
 // ويمكن التحكم به عبر متغير البيئة STREAM_CACHE_DIR.
 const CACHE_ROOT = process.env.STREAM_CACHE_DIR || path.join(os.tmpdir(), 'ipstream-cache');
 
+// تنظيف عمليات ffmpeg الأيتام من دورات سابقة — pm2 restart يقتل node فقط،
+// والأبناء يتيتّمون ويستمرون شغالين، فتتكدس عمليات لا حاجة لها.
+function killOrphanFfmpeg() {
+    const kill = spawn('pkill', ['-9', '-f', 'ipstream-cache']);
+    kill.on('error', () => { }); // pkill غير متوفر في أنظمة غير لينكس — نتجاهل
+}
+killOrphanFfmpeg();
+
 // --- تشغيل خادم RTMP لاستقبال البث من OBS ---
 const nmsConfig = {
   rtmp: {
