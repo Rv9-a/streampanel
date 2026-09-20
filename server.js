@@ -273,10 +273,7 @@ const defaultChannels = [];
 const mk = (id, name, url, group, always = 0, streamType = 1) => [id, name, url, streamType, group, always];
 const sepCh = (id, label, group) => mk(`sep_${id}`, `════ ${label} ════`, SEP_URL, group);
 
-// ── bein rv (تعمل دائماً + بروكسي) ──
-for (let i = 1; i <= 7; i++) {
-    defaultChannels.push(mk(`bein${i}`, `beIN Sports ${i} FHD`, `https://raw.githubusercontent.com/Ilias23-dev/S-AP/refs/heads/main/beIN${i}FHD.m3u8`, groupRV, 1, 0));
-}
+// ── bein rv (قناة rvtv فقط — removed the hijacked beIN1-7 sources) ──
 defaultChannels.push(mk('rvtv_event', 'Rvtv (live event)', 'rtmp://127.0.0.1:1935/live/event', groupRV, 1, 0));
 
 // ── bein ss ──
