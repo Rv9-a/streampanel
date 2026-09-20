@@ -276,7 +276,7 @@ const sepCh = (id, label, group) => mk(`sep_${id}`, `════ ${label} ═�
 // ── bein ss (باضافة قناة rvtv الخاصة) ──
 const ssBase = 'http://pro.netmos.ovh:7355/live/EXMOQNS9Y30998CX0/LKHSB87278DOKCPP/';
 defaultChannels.push(mk('rvtv_event', 'Rvtv (live event)', 'rtmp://127.0.0.1:1935/live/event', groupSS, 1, 0));
-const ss4k = ['221764', '221765', '221766', '221767', 'https://prime-fast.sytes.net/prime-tv/stream/78.m3u8', '221769', '221770', '221771'];
+const ss4k = ['221764', '221767', '221769', '221770', '221771'];
 defaultChannels.push(sepCh('ss_4k', '4K', groupSS));
 defaultChannels.push(mk('bein_ss_4k_true', 'bein 4K (true 4k)', `${ssBase}158960.ts`, groupSS));
 defaultChannels.push(mk('bein_ss_4k_event', 'bein 4K (only event)', `${ssBase}158961.ts`, groupSS));
@@ -289,7 +289,7 @@ defaultChannels.push(sepCh('ss_misc', 'متنوعة', groupSS));
 defaultChannels.push(mk('bein_ss_news', 'bein news', `${ssBase}83618.ts`, groupSS));
 defaultChannels.push(mk('bein_ss_global', 'bein global', `${ssBase}231675.ts`, groupSS));
 defaultChannels.push(sepCh('ss_sd', 'SD', groupSS));
-['102890', '102891', '108484', '108485', '158897', '102895', '108486', '158898', '158899'].forEach((u, i) => {
+['102890', '102891', '108484', '108485'].forEach((u, i) => {
     defaultChannels.push(mk(`bein_ss_sd${i + 1}`, `beinsport ${i + 1} SD`, `${ssBase}${u}.ts`, groupSS));
 });
 defaultChannels.push(sepCh('ss_hd', 'HD', groupSS));
@@ -497,6 +497,11 @@ function startChannelProcess(id, url, streamType = 0, alwaysOn = false, group = 
             '-user_agent', HEADERS['User-Agent'],
             '-headers', `Referer: ${HEADERS['Referer']}\r\nOrigin: ${HEADERS['Origin']}\r\n`
         );
+    }
+
+    // netmos.ovh يرفض الوصول بدون Referer (403) ويعيد 302+توكن إلى CDN البث عند وجوده
+    if (!isRtmp && url.includes('netmos.ovh')) {
+        ffmpegArgs.push('-headers', `Referer: ${HEADERS['Referer']}\r\nOrigin: ${HEADERS['Origin']}\r\n`);
     }
 
     // التوقيت القديم: مقطع كل 5 ثوانٍ × نافذة 6 (≈30 ثانية) — لا يجهد الرامات/المعالج
